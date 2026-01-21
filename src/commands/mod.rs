@@ -1,2 +1,2 @@
-pub mod manage;
 pub mod deps;
+pub mod manage;

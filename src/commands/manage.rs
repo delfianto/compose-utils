@@ -1,43 +1,44 @@
 use crate::core::Context;
 use anyhow::{Context as _, Result, bail};
+use std::path::PathBuf;
 use std::process::Command;
 
-fn get_service_name(project: &str) -> String {
-    let project = if project.ends_with(".service") {
-        if project.starts_with("compose@") {
-            return project.to_string();
-        }
-        &project[..project.len() - 8]
-    } else {
-        project
-    };
-
-    if !project.starts_with("compose@") {
-        format!("compose@{}.service", project)
-    } else {
-        if !project.ends_with(".service") {
-            format!("{}.service", project)
-        } else {
-            project.to_string()
-        }
-    }
+/// Convert project name to directory path.
+/// Both `genai-ollama` and `genai/ollama` resolve to `genai/ollama`.
+fn name_to_dir_path(name: &str) -> String {
+    name.replace('-', "/")
 }
 
-/// Extract the bare service name (without compose@ prefix and .service suffix)
+/// Convert project name to systemd service name.
+/// Both `genai-ollama` and `genai/ollama` become `compose@genai-ollama.service`.
+fn name_to_service(name: &str) -> String {
+    let normalized = name.replace('/', "-");
+    format!("compose@{}.service", normalized)
+}
+
+/// Extract the bare project name from various input formats.
+/// Strips `compose@` prefix and `.service` suffix if present.
 fn get_bare_name(service: &str) -> &str {
     let s = service.strip_suffix(".service").unwrap_or(service);
     s.strip_prefix("compose@").unwrap_or(s)
 }
 
-/// Validate that compose directories exist for all given services
+/// Get the compose directory for a project.
+fn get_compose_dir(ctx: &Context, name: &str) -> PathBuf {
+    let bare = get_bare_name(name);
+    let dir_path = name_to_dir_path(bare);
+    ctx.compose_base.join(dir_path)
+}
+
+/// Validate that compose directories exist for all given services.
 fn validate_compose_dirs(ctx: &Context, services: &[String]) -> Result<()> {
     let mut missing = Vec::new();
 
     for service in services {
-        let name = get_bare_name(service);
-        let dir = ctx.compose_base.join(name);
+        let bare = get_bare_name(service);
+        let dir = get_compose_dir(ctx, bare);
         if !dir.exists() {
-            missing.push((name.to_string(), dir));
+            missing.push((bare.to_string(), dir));
         }
     }
 
@@ -74,7 +75,8 @@ pub fn run_systemctl(
     cmd.arg(action);
 
     for service in services {
-        cmd.arg(get_service_name(service));
+        let bare = get_bare_name(service);
+        cmd.arg(name_to_service(bare));
     }
 
     println!("Running: {:?}", cmd);
@@ -102,10 +104,10 @@ pub fn run_update(ctx: &Context, services: &[String]) -> Result<()> {
     validate_compose_dirs(ctx, services)?;
 
     for service in services {
-        let name = get_bare_name(service);
-        let dir = ctx.compose_base.join(name);
+        let bare = get_bare_name(service);
+        let dir = get_compose_dir(ctx, bare);
 
-        println!("Pulling images for '{}'...", name);
+        println!("Pulling images for '{}'...", bare);
         let mut pull_cmd = Command::new("docker");
         pull_cmd.args(["compose", "pull"]);
         pull_cmd.current_dir(&dir);
@@ -118,7 +120,7 @@ pub fn run_update(ctx: &Context, services: &[String]) -> Result<()> {
         if !status.success() {
             bail!(
                 "Failed to pull images for '{}' (exit code: {})",
-                name,
+                bare,
                 status.code().unwrap_or(1)
             );
         }
@@ -139,20 +141,14 @@ pub fn run_list(ctx: &Context) -> Result<()> {
     Ok(())
 }
 
-pub fn run_logs(
-    ctx: &Context,
-    services: &[String],
-    follow: bool,
-    lines: Option<usize>,
-) -> Result<()> {
+pub fn run_logs(ctx: &Context, service: &str, follow: bool, lines: Option<usize>) -> Result<()> {
     let mut cmd = Command::new("journalctl");
     if !ctx.is_root {
         cmd.arg("--user");
     }
 
-    for service in services {
-        cmd.arg("-u").arg(get_service_name(service));
-    }
+    let bare = get_bare_name(service);
+    cmd.arg("-u").arg(name_to_service(bare));
 
     if follow {
         cmd.arg("-f");

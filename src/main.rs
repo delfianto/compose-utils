@@ -61,8 +61,8 @@ enum Commands {
     List,
     /// View service logs (journalctl wrapper)
     Logs {
-        /// Service names to view logs for
-        services: Vec<String>,
+        /// Service name (e.g., myapp or genai-ollama or genai/ollama)
+        service: String,
         /// Follow log output
         #[arg(short, long)]
         follow: bool,
@@ -88,10 +88,10 @@ fn main() -> Result<()> {
         Commands::Disable { services } => manage::run_systemctl(&ctx, "disable", &services, false),
         Commands::List => manage::run_list(&ctx),
         Commands::Logs {
-            services,
+            service,
             follow,
             lines,
-        } => manage::run_logs(&ctx, &services, follow, lines),
+        } => manage::run_logs(&ctx, &service, follow, lines),
         Commands::Deps(args) => deps::run(&ctx, args),
     }
 }
