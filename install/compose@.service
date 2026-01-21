@@ -1,0 +1,17 @@
+[Unit]
+Description=Compose Service for %i
+Requires=docker.service
+After=docker.service
+
+[Service]
+Type=simple
+EnvironmentFile=-/etc/compose.env
+EnvironmentFile=-$${HOME}/.config/compose.env
+WorkingDirectory=${compose_base}/%i
+ExecStart=${compose_bin_path} up
+ExecStop=${compose_bin_path} down
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=default.target

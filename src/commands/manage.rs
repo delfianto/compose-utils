@@ -1,64 +1,10 @@
 use crate::core::Context;
-use anyhow::{Context as _, Result};
-use clap::{Args, Subcommand};
+use anyhow::{Context as _, Result, bail};
 use std::process::Command;
-
-#[derive(Args)]
-pub struct ManageArgs {
-    #[command(subcommand)]
-    action: Action,
-}
-
-#[derive(Subcommand)]
-pub enum Action {
-    Start {
-        services: Vec<String>,
-    },
-    Stop {
-        services: Vec<String>,
-    },
-    Restart {
-        services: Vec<String>,
-    },
-    Status {
-        services: Vec<String>,
-    },
-    Enable {
-        services: Vec<String>,
-    },
-    Disable {
-        services: Vec<String>,
-    },
-    List,
-    Logs {
-        services: Vec<String>,
-        #[arg(short, long)]
-        follow: bool,
-        #[arg(short = 'n', long)]
-        lines: Option<usize>,
-    },
-}
-
-pub fn run(ctx: &Context, args: ManageArgs) -> Result<()> {
-    match args.action {
-        Action::Start { services } => run_systemctl(ctx, "start", &services),
-        Action::Stop { services } => run_systemctl(ctx, "stop", &services),
-        Action::Restart { services } => run_systemctl(ctx, "restart", &services),
-        Action::Status { services } => run_systemctl(ctx, "status", &services),
-        Action::Enable { services } => run_systemctl(ctx, "enable", &services),
-        Action::Disable { services } => run_systemctl(ctx, "disable", &services),
-        Action::List => run_list(ctx),
-        Action::Logs {
-            services,
-            follow,
-            lines,
-        } => run_logs(ctx, &services, follow, lines),
-    }
-}
 
 fn get_service_name(project: &str) -> String {
     let project = if project.ends_with(".service") {
-        if project.starts_with("docker-compose@") {
+        if project.starts_with("compose@") {
             return project.to_string();
         }
         &project[..project.len() - 8]
@@ -66,10 +12,9 @@ fn get_service_name(project: &str) -> String {
         project
     };
 
-    if !project.starts_with("docker-compose@") {
-        format!("docker-compose@{}.service", project)
+    if !project.starts_with("compose@") {
+        format!("compose@{}.service", project)
     } else {
-        // Should already be handled but safety net
         if !project.ends_with(".service") {
             format!("{}.service", project)
         } else {
@@ -78,7 +23,50 @@ fn get_service_name(project: &str) -> String {
     }
 }
 
-fn run_systemctl(ctx: &Context, action: &str, services: &[String]) -> Result<()> {
+/// Extract the bare service name (without compose@ prefix and .service suffix)
+fn get_bare_name(service: &str) -> &str {
+    let s = service.strip_suffix(".service").unwrap_or(service);
+    s.strip_prefix("compose@").unwrap_or(s)
+}
+
+/// Validate that compose directories exist for all given services
+fn validate_compose_dirs(ctx: &Context, services: &[String]) -> Result<()> {
+    let mut missing = Vec::new();
+
+    for service in services {
+        let name = get_bare_name(service);
+        let dir = ctx.compose_base.join(name);
+        if !dir.exists() {
+            missing.push((name.to_string(), dir));
+        }
+    }
+
+    if !missing.is_empty() {
+        let msg = missing
+            .iter()
+            .map(|(name, path)| format!("  - '{}' (expected at {})", name, path.display()))
+            .collect::<Vec<_>>()
+            .join("\n");
+        bail!(
+            "Compose directory not found for the following services:\n{}\n\nEnsure the service name matches an existing directory under {}",
+            msg,
+            ctx.compose_base.display()
+        );
+    }
+
+    Ok(())
+}
+
+pub fn run_systemctl(
+    ctx: &Context,
+    action: &str,
+    services: &[String],
+    validate: bool,
+) -> Result<()> {
+    if validate {
+        validate_compose_dirs(ctx, services)?;
+    }
+
     let mut cmd = Command::new(&ctx.systemctl_cmd[0]);
     if ctx.systemctl_cmd.len() > 1 {
         cmd.args(&ctx.systemctl_cmd[1..]);
@@ -98,18 +86,65 @@ fn run_systemctl(ctx: &Context, action: &str, services: &[String]) -> Result<()>
     Ok(())
 }
 
-fn run_list(ctx: &Context) -> Result<()> {
+pub fn run_start(ctx: &Context, services: &[String]) -> Result<()> {
+    run_systemctl(ctx, "start", services, true)
+}
+
+pub fn run_stop(ctx: &Context, services: &[String]) -> Result<()> {
+    run_systemctl(ctx, "stop", services, true)
+}
+
+pub fn run_restart(ctx: &Context, services: &[String]) -> Result<()> {
+    run_systemctl(ctx, "restart", services, true)
+}
+
+pub fn run_update(ctx: &Context, services: &[String]) -> Result<()> {
+    validate_compose_dirs(ctx, services)?;
+
+    for service in services {
+        let name = get_bare_name(service);
+        let dir = ctx.compose_base.join(name);
+
+        println!("Pulling images for '{}'...", name);
+        let mut pull_cmd = Command::new("docker");
+        pull_cmd.args(["compose", "pull"]);
+        pull_cmd.current_dir(&dir);
+
+        println!("Running: {:?}", pull_cmd);
+        let status = pull_cmd
+            .status()
+            .context("Failed to run docker compose pull")?;
+
+        if !status.success() {
+            bail!(
+                "Failed to pull images for '{}' (exit code: {})",
+                name,
+                status.code().unwrap_or(1)
+            );
+        }
+    }
+
+    println!("\nRestarting services...");
+    run_systemctl(ctx, "restart", services, false)
+}
+
+pub fn run_list(ctx: &Context) -> Result<()> {
     let mut cmd = Command::new(&ctx.systemctl_cmd[0]);
     if ctx.systemctl_cmd.len() > 1 {
         cmd.args(&ctx.systemctl_cmd[1..]);
     }
-    cmd.args(["list-units", "docker-compose@*.service", "--all"]);
+    cmd.args(["list-units", "compose@*.service", "--all"]);
 
     cmd.status().context("Failed to list units")?;
     Ok(())
 }
 
-fn run_logs(ctx: &Context, services: &[String], follow: bool, lines: Option<usize>) -> Result<()> {
+pub fn run_logs(
+    ctx: &Context,
+    services: &[String],
+    follow: bool,
+    lines: Option<usize>,
+) -> Result<()> {
     let mut cmd = Command::new("journalctl");
     if !ctx.is_root {
         cmd.arg("--user");

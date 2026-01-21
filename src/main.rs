@@ -8,7 +8,7 @@ use crate::commands::{deps, manage};
 use crate::core::get_context;
 
 #[derive(Parser)]
-#[command(name = "compose-utils")]
+#[command(name = "compose")]
 #[command(about = "Utilities for managing Docker Compose services with Systemd", long_about = None)]
 struct Cli {
     #[command(subcommand)]
@@ -17,8 +17,59 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Commands {
-    /// Manage docker-compose services (systemctl wrapper)
-    Manage(manage::ManageArgs),
+    /// Start services
+    #[command(visible_alias = "up")]
+    Start {
+        /// Service names to start
+        services: Vec<String>,
+    },
+    /// Stop services
+    #[command(visible_alias = "down")]
+    Stop {
+        /// Service names to stop
+        services: Vec<String>,
+    },
+    /// Restart services
+    #[command(visible_alias = "reup")]
+    Restart {
+        /// Service names to restart
+        services: Vec<String>,
+    },
+    /// Pull images and restart services
+    #[command(visible_alias = "pull")]
+    Update {
+        /// Service names to update
+        services: Vec<String>,
+    },
+    /// Show service status
+    Status {
+        /// Service names to check
+        services: Vec<String>,
+    },
+    /// Enable services to start on boot
+    Enable {
+        /// Service names to enable
+        services: Vec<String>,
+    },
+    /// Disable services from starting on boot
+    Disable {
+        /// Service names to disable
+        services: Vec<String>,
+    },
+    /// List all managed docker-compose services
+    #[command(visible_alias = "ls")]
+    List,
+    /// View service logs (journalctl wrapper)
+    Logs {
+        /// Service names to view logs for
+        services: Vec<String>,
+        /// Follow log output
+        #[arg(short, long)]
+        follow: bool,
+        /// Number of lines to show
+        #[arg(short = 'n', long)]
+        lines: Option<usize>,
+    },
     /// Manage service dependencies
     Deps(deps::DepsArgs),
 }
@@ -28,7 +79,19 @@ fn main() -> Result<()> {
     let ctx = get_context()?;
 
     match cli.command {
-        Commands::Manage(args) => manage::run(&ctx, args),
+        Commands::Start { services } => manage::run_start(&ctx, &services),
+        Commands::Stop { services } => manage::run_stop(&ctx, &services),
+        Commands::Restart { services } => manage::run_restart(&ctx, &services),
+        Commands::Update { services } => manage::run_update(&ctx, &services),
+        Commands::Status { services } => manage::run_systemctl(&ctx, "status", &services, false),
+        Commands::Enable { services } => manage::run_systemctl(&ctx, "enable", &services, false),
+        Commands::Disable { services } => manage::run_systemctl(&ctx, "disable", &services, false),
+        Commands::List => manage::run_list(&ctx),
+        Commands::Logs {
+            services,
+            follow,
+            lines,
+        } => manage::run_logs(&ctx, &services, follow, lines),
         Commands::Deps(args) => deps::run(&ctx, args),
     }
 }

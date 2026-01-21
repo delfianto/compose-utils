@@ -10,6 +10,7 @@ pub struct Context {
     pub is_root: bool,
     pub systemd_dir: PathBuf,
     pub systemctl_cmd: Vec<String>,
+    pub compose_base: PathBuf,
 }
 
 pub fn get_context() -> Result<Context> {
@@ -21,6 +22,7 @@ pub fn get_context() -> Result<Context> {
             is_root: true,
             systemd_dir: PathBuf::from("/etc/systemd/system"),
             systemctl_cmd: vec!["systemctl".to_string()],
+            compose_base: PathBuf::from("/srv/compose"),
         })
     } else {
         let base_dirs = BaseDirs::new().context("Could not determine user home directory")?;
@@ -41,6 +43,7 @@ pub fn get_context() -> Result<Context> {
             is_root: false,
             systemd_dir: xdg_config.join("systemd/user"),
             systemctl_cmd: vec!["systemctl".to_string(), "--user".to_string()],
+            compose_base: base_dirs.home_dir().join("compose-projects"),
         })
     }
 }

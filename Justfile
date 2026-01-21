@@ -5,7 +5,10 @@ build:
     cargo build --release
 
 install: build
-    ./install.sh
+    python3 install/setup.py install
+
+uninstall:
+    python3 install/setup.py uninstall
 
 clean:
     cargo clean
