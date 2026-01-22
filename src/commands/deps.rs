@@ -37,23 +37,21 @@ pub fn run(ctx: &Context, args: DepsArgs) -> Result<()> {
 }
 
 fn get_compose_service_name(project: &str) -> String {
-    let project = if project.ends_with(".service") {
+    let project = if let Some(stripped) = project.strip_suffix(".service") {
         if project.starts_with("docker-compose@") {
             return project.to_string();
         }
-        &project[..project.len() - 8]
+        stripped
     } else {
         project
     };
 
     if !project.starts_with("docker-compose@") {
         format!("docker-compose@{}.service", project)
+    } else if !project.ends_with(".service") {
+        format!("{}.service", project)
     } else {
-        if !project.ends_with(".service") {
-            format!("{}.service", project)
-        } else {
-            project.to_string()
-        }
+        project.to_string()
     }
 }
 
@@ -175,10 +173,10 @@ fn remove_deps(ctx: &Context, service: &str, deps_to_remove: &[String]) -> Resul
         let dep_name = get_compose_service_name(dep);
 
         for key in ["Requires", "Wants", "After"] {
-            if let Some(list) = current_deps.get_mut(key) {
-                if let Some(pos) = list.iter().position(|x| x == &dep_name) {
-                    list.remove(pos);
-                }
+            if let Some(list) = current_deps.get_mut(key)
+                && let Some(pos) = list.iter().position(|x| x == &dep_name)
+            {
+                list.remove(pos);
             }
         }
     }

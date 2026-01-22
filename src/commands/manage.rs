@@ -1,5 +1,5 @@
 use crate::core::Context;
-use anyhow::{bail, Context as _, Result};
+use anyhow::{Context as _, Result, bail};
 use std::env;
 use std::path::PathBuf;
 use std::process::Command;
@@ -67,8 +67,7 @@ fn detect_service_from_cwd(ctx: &Context) -> Option<String> {
 
     let service_name = rel_path
         .to_str()?
-        .replace(std::path::MAIN_SEPARATOR, "-")
-        .replace('/', "-");
+        .replace([std::path::MAIN_SEPARATOR, '/'], "-");
 
     Some(service_name)
 }
@@ -258,6 +257,7 @@ mod tests {
             systemd_dir: PathBuf::from("/tmp/test-systemd"),
             systemctl_cmd: vec!["systemctl".to_string(), "--user".to_string()],
             compose_base: compose_base.to_path_buf(),
+            env_file: PathBuf::from("/tmp/test-compose.env"),
         }
     }
 
@@ -301,7 +301,10 @@ mod tests {
 
     #[test]
     fn test_name_to_service_with_slash() {
-        assert_eq!(name_to_service("genai/ollama"), "compose@genai-ollama.service");
+        assert_eq!(
+            name_to_service("genai/ollama"),
+            "compose@genai-ollama.service"
+        );
     }
 
     #[test]

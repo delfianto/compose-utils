@@ -4,7 +4,7 @@ use clap::{Parser, Subcommand};
 mod commands;
 mod core;
 
-use crate::commands::{deps, manage};
+use crate::commands::{config, deps, manage};
 use crate::core::get_context;
 
 #[derive(Parser)]
@@ -72,6 +72,8 @@ enum Commands {
     },
     /// Manage service dependencies
     Deps(deps::DepsArgs),
+    /// View or update configuration
+    Config(config::ConfigArgs),
 }
 
 fn main() -> Result<()> {
@@ -93,5 +95,6 @@ fn main() -> Result<()> {
             lines,
         } => manage::run_logs(&ctx, service.as_deref().unwrap_or(""), follow, lines),
         Commands::Deps(args) => deps::run(&ctx, args),
+        Commands::Config(args) => config::run(&ctx, args),
     }
 }
