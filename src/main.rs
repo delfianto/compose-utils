@@ -86,8 +86,8 @@ fn main() -> Result<()> {
         Commands::Restart { services } => manage::run_restart(&ctx, &services),
         Commands::Update { services } => manage::run_update(&ctx, &services),
         Commands::Status { services } => manage::run_systemctl(&ctx, "status", &services, false),
-        Commands::Enable { services } => manage::run_systemctl(&ctx, "enable", &services, false),
-        Commands::Disable { services } => manage::run_systemctl(&ctx, "disable", &services, false),
+        Commands::Enable { services } => manage::run_enable(&ctx, &services),
+        Commands::Disable { services } => manage::run_disable(&ctx, &services),
         Commands::List => manage::run_list(&ctx),
         Commands::Logs {
             service,

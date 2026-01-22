@@ -1,17 +1,18 @@
 [Unit]
 Description=Compose Service for %i
-Requires=docker.service
+Wants=docker.service
 After=docker.service
 
 [Service]
 Type=simple
 EnvironmentFile=-/etc/compose.env
-EnvironmentFile=-$${HOME}/.config/compose.env
+EnvironmentFile=-%h/.config/compose.env
 WorkingDirectory=${compose_base}/%i
-ExecStart=${compose_bin_path} up
-ExecStop=${compose_bin_path} down
+ExecStart=${compose_bin_path} up --wait --remove-orphans
+ExecStop=${compose_bin_path} down --remove-orphans
 Restart=always
 RestartSec=10
+TimeoutStopSec=60
 
 [Install]
 WantedBy=default.target

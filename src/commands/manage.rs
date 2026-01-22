@@ -1,6 +1,8 @@
 use crate::core::Context;
 use anyhow::{Context as _, Result, bail};
 use std::env;
+use std::fs;
+use std::os::unix::fs::symlink;
 use std::path::PathBuf;
 use std::process::Command;
 
@@ -242,6 +244,141 @@ pub fn run_logs(ctx: &Context, service: &str, follow: bool, lines: Option<usize>
 
     println!("Running: {:?}", cmd);
     cmd.status().context("Failed to run logs")?;
+    Ok(())
+}
+
+/// Get the symlink path for a service (used when directory is nested).
+/// Returns the path where a symlink should be created to map the flat name
+/// to the nested directory structure.
+fn get_symlink_path(ctx: &Context, name: &str) -> Option<PathBuf> {
+    let bare = get_bare_name(name);
+    let dir_path = name_to_dir_path(ctx, bare);
+
+    // If the directory path contains a slash, it's nested
+    // and we need a symlink from the flat name to the nested path
+    if dir_path.contains('/') {
+        let flat_name = bare.replace('/', "-");
+        Some(ctx.compose_base.join(flat_name))
+    } else {
+        None
+    }
+}
+
+/// Create a symlink for nested directories so systemd can find them.
+fn ensure_symlink(ctx: &Context, name: &str) -> Result<()> {
+    let bare = get_bare_name(name);
+    let dir_path = name_to_dir_path(ctx, bare);
+
+    // Only needed for nested directories
+    if !dir_path.contains('/') {
+        return Ok(());
+    }
+
+    let flat_name = bare.replace('/', "-");
+    let symlink_path = ctx.compose_base.join(&flat_name);
+    let target_path = ctx.compose_base.join(&dir_path);
+
+    // If symlink already exists and points to the right place, we're done
+    if symlink_path.is_symlink() {
+        let current_target = fs::read_link(&symlink_path)?;
+        if current_target == target_path
+            || current_target.as_path() == std::path::Path::new(&dir_path)
+        {
+            return Ok(());
+        }
+        // Wrong target, remove and recreate
+        fs::remove_file(&symlink_path)?;
+    } else if symlink_path.exists() {
+        // Something else exists at this path
+        bail!(
+            "Cannot create symlink at {}: path already exists and is not a symlink",
+            symlink_path.display()
+        );
+    }
+
+    println!(
+        "Creating symlink: {} -> {}",
+        symlink_path.display(),
+        dir_path
+    );
+    symlink(&dir_path, &symlink_path).with_context(|| {
+        format!(
+            "Failed to create symlink {} -> {}",
+            symlink_path.display(),
+            dir_path
+        )
+    })?;
+
+    Ok(())
+}
+
+/// Remove symlink for a service if it exists.
+fn remove_symlink(ctx: &Context, name: &str) -> Result<()> {
+    if let Some(symlink_path) = get_symlink_path(ctx, name)
+        && symlink_path.is_symlink()
+    {
+        println!("Removing symlink: {}", symlink_path.display());
+        fs::remove_file(&symlink_path)?;
+    }
+    Ok(())
+}
+
+pub fn run_enable(ctx: &Context, services: &[String]) -> Result<()> {
+    let services = resolve_services(ctx, services)?;
+    validate_compose_dirs(ctx, &services)?;
+
+    // Create symlinks for nested directories
+    for service in &services {
+        ensure_symlink(ctx, service)?;
+    }
+
+    // Run systemctl enable
+    let mut cmd = Command::new(&ctx.systemctl_cmd[0]);
+    if ctx.systemctl_cmd.len() > 1 {
+        cmd.args(&ctx.systemctl_cmd[1..]);
+    }
+    cmd.arg("enable");
+
+    for service in &services {
+        let bare = get_bare_name(service);
+        cmd.arg(name_to_service(bare));
+    }
+
+    println!("Running: {:?}", cmd);
+    let status = cmd.status().context("Failed to execute systemctl")?;
+
+    if !status.success() {
+        std::process::exit(status.code().unwrap_or(1));
+    }
+    Ok(())
+}
+
+pub fn run_disable(ctx: &Context, services: &[String]) -> Result<()> {
+    let services = resolve_services(ctx, services)?;
+
+    // Run systemctl disable first
+    let mut cmd = Command::new(&ctx.systemctl_cmd[0]);
+    if ctx.systemctl_cmd.len() > 1 {
+        cmd.args(&ctx.systemctl_cmd[1..]);
+    }
+    cmd.arg("disable");
+
+    for service in &services {
+        let bare = get_bare_name(service);
+        cmd.arg(name_to_service(bare));
+    }
+
+    println!("Running: {:?}", cmd);
+    let status = cmd.status().context("Failed to execute systemctl")?;
+
+    // Remove symlinks
+    for service in &services {
+        remove_symlink(ctx, service)?;
+    }
+
+    if !status.success() {
+        std::process::exit(status.code().unwrap_or(1));
+    }
     Ok(())
 }
 

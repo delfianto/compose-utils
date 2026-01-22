@@ -25,14 +25,14 @@ pub struct ConfigArgs {
     #[arg(long, help = "Set COMPOSE_BASE directory path")]
     compose_base: Option<String>,
 
-    #[arg(long, help = "Set TRAEFIK_ACME_DOMAIN")]
-    traefik_acme_domain: Option<String>,
+    #[arg(long, help = "Set ACME domain for Traefik")]
+    acme_domain: Option<String>,
 
-    #[arg(long, help = "Set TRAEFIK_ACME_EMAIL")]
-    traefik_acme_email: Option<String>,
+    #[arg(long, help = "Set ACME email for Traefik")]
+    acme_email: Option<String>,
 
-    #[arg(long, help = "Set TRAEFIK_ACME_SERVER URL")]
-    traefik_acme_server: Option<String>,
+    #[arg(long, help = "Set ACME server URL for Traefik")]
+    acme_server: Option<String>,
 
     #[arg(long, help = "Set DOCKER_HOST")]
     docker_host: Option<String>,
@@ -50,9 +50,9 @@ impl ConfigArgs {
     fn has_updates(&self) -> bool {
         self.compose_data.is_some()
             || self.compose_base.is_some()
-            || self.traefik_acme_domain.is_some()
-            || self.traefik_acme_email.is_some()
-            || self.traefik_acme_server.is_some()
+            || self.acme_domain.is_some()
+            || self.acme_email.is_some()
+            || self.acme_server.is_some()
             || self.docker_host.is_some()
     }
 }
@@ -156,17 +156,17 @@ fn update_config(ctx: &Context, args: ConfigArgs) -> Result<()> {
         config.insert("COMPOSE_BASE".to_string(), value.clone());
     }
 
-    if let Some(ref value) = args.traefik_acme_domain {
+    if let Some(ref value) = args.acme_domain {
         validate_domain(value)?;
         config.insert("TRAEFIK_ACME_DOMAIN".to_string(), value.clone());
     }
 
-    if let Some(ref value) = args.traefik_acme_email {
+    if let Some(ref value) = args.acme_email {
         validate_email(value)?;
         config.insert("TRAEFIK_ACME_EMAIL".to_string(), value.clone());
     }
 
-    if let Some(ref value) = args.traefik_acme_server {
+    if let Some(ref value) = args.acme_server {
         validate_acme_server(value)?;
         config.insert("TRAEFIK_ACME_SERVER".to_string(), value.clone());
     }
@@ -352,9 +352,9 @@ mod tests {
         let args = ConfigArgs {
             compose_data: None,
             compose_base: None,
-            traefik_acme_domain: None,
-            traefik_acme_email: None,
-            traefik_acme_server: None,
+            acme_domain: None,
+            acme_email: None,
+            acme_server: None,
             docker_host: None,
         };
         assert!(!args.has_updates());
@@ -365,9 +365,9 @@ mod tests {
         let args = ConfigArgs {
             compose_data: Some("/tmp".to_string()),
             compose_base: None,
-            traefik_acme_domain: None,
-            traefik_acme_email: None,
-            traefik_acme_server: None,
+            acme_domain: None,
+            acme_email: None,
+            acme_server: None,
             docker_host: None,
         };
         assert!(args.has_updates());
@@ -378,9 +378,9 @@ mod tests {
         let args = ConfigArgs {
             compose_data: None,
             compose_base: Some("/tmp".to_string()),
-            traefik_acme_domain: None,
-            traefik_acme_email: None,
-            traefik_acme_server: None,
+            acme_domain: None,
+            acme_email: None,
+            acme_server: None,
             docker_host: None,
         };
         assert!(args.has_updates());
@@ -391,9 +391,9 @@ mod tests {
         let args = ConfigArgs {
             compose_data: None,
             compose_base: None,
-            traefik_acme_domain: Some("example.com".to_string()),
-            traefik_acme_email: None,
-            traefik_acme_server: None,
+            acme_domain: Some("example.com".to_string()),
+            acme_email: None,
+            acme_server: None,
             docker_host: None,
         };
         assert!(args.has_updates());
@@ -404,9 +404,9 @@ mod tests {
         let args = ConfigArgs {
             compose_data: Some("/tmp".to_string()),
             compose_base: Some("/tmp".to_string()),
-            traefik_acme_domain: Some("example.com".to_string()),
-            traefik_acme_email: None,
-            traefik_acme_server: None,
+            acme_domain: Some("example.com".to_string()),
+            acme_email: None,
+            acme_server: None,
             docker_host: None,
         };
         assert!(args.has_updates());
@@ -923,9 +923,9 @@ mod tests {
         let args = ConfigArgs {
             compose_data: Some(subdir.to_str().unwrap().to_string()),
             compose_base: None,
-            traefik_acme_domain: None,
-            traefik_acme_email: None,
-            traefik_acme_server: None,
+            acme_domain: None,
+            acme_email: None,
+            acme_server: None,
             docker_host: None,
         };
 
@@ -951,9 +951,9 @@ mod tests {
         let args = ConfigArgs {
             compose_data: Some(data_dir.to_str().unwrap().to_string()),
             compose_base: Some(base_dir.to_str().unwrap().to_string()),
-            traefik_acme_domain: Some("example.com".to_string()),
-            traefik_acme_email: Some("admin@example.com".to_string()),
-            traefik_acme_server: None,
+            acme_domain: Some("example.com".to_string()),
+            acme_email: Some("admin@example.com".to_string()),
+            acme_server: None,
             docker_host: None,
         };
 
@@ -988,9 +988,9 @@ mod tests {
         let args = ConfigArgs {
             compose_data: Some("/nonexistent/path".to_string()),
             compose_base: None,
-            traefik_acme_domain: None,
-            traefik_acme_email: None,
-            traefik_acme_server: None,
+            acme_domain: None,
+            acme_email: None,
+            acme_server: None,
             docker_host: None,
         };
 
@@ -1007,9 +1007,9 @@ mod tests {
         let args = ConfigArgs {
             compose_data: None,
             compose_base: None,
-            traefik_acme_domain: Some("not a domain".to_string()),
-            traefik_acme_email: None,
-            traefik_acme_server: None,
+            acme_domain: Some("not a domain".to_string()),
+            acme_email: None,
+            acme_server: None,
             docker_host: None,
         };
 
@@ -1026,9 +1026,9 @@ mod tests {
         let args = ConfigArgs {
             compose_data: None,
             compose_base: None,
-            traefik_acme_domain: None,
-            traefik_acme_email: Some("not an email".to_string()),
-            traefik_acme_server: None,
+            acme_domain: None,
+            acme_email: Some("not an email".to_string()),
+            acme_server: None,
             docker_host: None,
         };
 
@@ -1045,9 +1045,9 @@ mod tests {
         let args = ConfigArgs {
             compose_data: None,
             compose_base: None,
-            traefik_acme_domain: None,
-            traefik_acme_email: None,
-            traefik_acme_server: None,
+            acme_domain: None,
+            acme_email: None,
+            acme_server: None,
             docker_host: Some("invalid".to_string()),
         };
 
@@ -1064,9 +1064,9 @@ mod tests {
         let args = ConfigArgs {
             compose_data: None,
             compose_base: None,
-            traefik_acme_domain: None,
-            traefik_acme_email: None,
-            traefik_acme_server: None,
+            acme_domain: None,
+            acme_email: None,
+            acme_server: None,
             docker_host: Some("tcp://localhost:2375".to_string()),
         };
 
