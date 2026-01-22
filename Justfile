@@ -4,11 +4,14 @@ default:
 build:
     cargo build --release
 
-install: build
-    python3 install/setup.py install
+install *args: build
+    python3 install/setup.py install {{ args }}
 
-uninstall:
-    python3 install/setup.py uninstall
+uninstall *args:
+    python3 install/setup.py uninstall {{ args }}
+
+reinstall:
+    python3 install/setup.py reinstall
 
 clean:
     cargo clean
