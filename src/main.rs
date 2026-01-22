@@ -61,8 +61,8 @@ enum Commands {
     List,
     /// View service logs (journalctl wrapper)
     Logs {
-        /// Service name (e.g., myapp or genai-ollama or genai/ollama)
-        service: String,
+        /// Service name (e.g., myapp or genai-ollama or genai/ollama). Optional if in a compose project directory.
+        service: Option<String>,
         /// Follow log output
         #[arg(short, long)]
         follow: bool,
@@ -91,7 +91,7 @@ fn main() -> Result<()> {
             service,
             follow,
             lines,
-        } => manage::run_logs(&ctx, &service, follow, lines),
+        } => manage::run_logs(&ctx, service.as_deref().unwrap_or(""), follow, lines),
         Commands::Deps(args) => deps::run(&ctx, args),
     }
 }
