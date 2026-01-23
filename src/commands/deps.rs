@@ -38,7 +38,7 @@ pub fn run(ctx: &Context, args: DepsArgs) -> Result<()> {
 
 fn get_compose_service_name(project: &str) -> String {
     let project = if let Some(stripped) = project.strip_suffix(".service") {
-        if project.starts_with("docker-compose@") {
+        if project.starts_with("compose@") {
             return project.to_string();
         }
         stripped
@@ -46,8 +46,8 @@ fn get_compose_service_name(project: &str) -> String {
         project
     };
 
-    if !project.starts_with("docker-compose@") {
-        format!("docker-compose@{}.service", project)
+    if !project.starts_with("compose@") {
+        format!("compose@{}.service", project)
     } else if !project.ends_with(".service") {
         format!("{}.service", project)
     } else {
