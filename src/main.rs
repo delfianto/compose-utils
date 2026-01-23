@@ -60,6 +60,11 @@ enum Commands {
     /// List all managed docker-compose services
     #[command(visible_alias = "ls")]
     List,
+    /// List containers for services
+    Ps {
+        /// Service names to check. Optional if in a compose project directory.
+        services: Vec<String>,
+    },
     /// View service logs (journalctl wrapper)
     Logs {
         /// Service name (e.g., myapp or genai-ollama or genai/ollama). Optional if in a compose project directory.
@@ -90,6 +95,7 @@ fn main() -> Result<()> {
         Commands::Enable { services } => manage::run_enable(&ctx, &services),
         Commands::Disable { services } => manage::run_disable(&ctx, &services),
         Commands::List => manage::run_list(&ctx),
+        Commands::Ps { services } => manage::run_ps(&ctx, &services),
         Commands::Logs {
             service,
             follow,

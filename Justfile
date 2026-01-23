@@ -10,7 +10,7 @@ install *args: build
 uninstall *args:
     python3 install/setup.py uninstall {{ args }}
 
-reinstall:
+reinstall: build
     python3 install/setup.py reinstall
 
 clean:

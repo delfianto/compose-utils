@@ -237,13 +237,25 @@ def uninstall(cfg: Config) -> None:
 
 
 def reinstall(cfg: Config) -> None:
-    """Reinstall the service file based on existing configuration."""
-    print(f"Reinstalling service for {cfg.mode} mode...")
+    """Reinstall the binary and service file based on existing configuration."""
+    print(f"Reinstalling for {cfg.mode} mode...")
 
     if not cfg.env_file.exists():
         print(f"Error: Environment file not found at {cfg.env_file}")
         print("Cannot reinstall without existing configuration.")
         sys.exit(1)
+
+    # Install binary
+    binary_src = PROJECT_ROOT / "target/release" / BINARY_NAME
+    if not binary_src.exists():
+        print(f"Error: Binary not found at {binary_src}")
+        print("Please run 'cargo build --release' first.")
+        sys.exit(1)
+
+    print(f"Installing binary to {cfg.binary_path}...")
+    cfg.bin_dir.mkdir(parents=True, exist_ok=True)
+    shutil.copy2(binary_src, cfg.binary_path)
+    cfg.binary_path.chmod(0o755)
 
     # Read existing configuration
     print(f"Reading configuration from {cfg.env_file}...")
@@ -274,6 +286,7 @@ def reinstall(cfg: Config) -> None:
     print()
     print("Reinstall complete!")
     print("-" * 50)
+    print(f"Binary location: {cfg.binary_path}")
     print(f"Service file: {cfg.service_path}")
     print(f"Environment file: {cfg.env_file}")
     print("-" * 50)

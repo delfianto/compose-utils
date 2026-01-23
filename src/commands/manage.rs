@@ -1,11 +1,25 @@
-use crate::core::Context;
 use crate::constants::COMPOSE_FILES;
-use anyhow::{Context as _, Result, bail};
+use crate::core::Context;
+use anyhow::{bail, Context as _, Result};
+use serde::Deserialize;
 use std::env;
 use std::fs;
 use std::os::unix::fs::symlink;
 use std::path::PathBuf;
 use std::process::Command;
+
+#[derive(Deserialize, Debug)]
+#[serde(rename_all = "PascalCase")]
+struct DockerContainer {
+    #[serde(rename = "ID")]
+    id: String,
+    names: String,
+    image: String,
+    created_at: String,
+    state: String,
+    status: String,
+    ports: String,
+}
 
 /// Convert project name to directory path.
 /// Handles both flat names (test-project) and nested names (genai-ollama -> genai/ollama).
@@ -81,7 +95,7 @@ fn resolve_services(ctx: &Context, services: &[String]) -> Result<Vec<String>> {
 
     bail!(
         "No service specified and current directory is not a compose project.\n\
-         Either specify a service name or run from a directory under {}",
+        Either specify a service name or run from a directory under {}",
         ctx.compose_base.display()
     );
 }
@@ -99,7 +113,7 @@ fn resolve_service(ctx: &Context, service: &str) -> Result<String> {
 
     bail!(
         "No service specified and current directory is not a compose project.\n\
-         Either specify a service name or run from a directory under {}",
+        Either specify a service name or run from a directory under {}",
         ctx.compose_base.display()
     );
 }
@@ -132,13 +146,77 @@ fn validate_compose_dirs(ctx: &Context, services: &[String]) -> Result<()> {
     Ok(())
 }
 
+/// Get all managed services by scanning COMPOSE_BASE.
+fn find_all_services(ctx: &Context) -> Result<Vec<String>> {
+    let mut services = Vec::new();
+    if !ctx.compose_base.exists() {
+        return Ok(services);
+    }
+
+    fn scan_dir(base: &std::path::Path, current: PathBuf, services: &mut Vec<String>) {
+        let entries = match fs::read_dir(&current) {
+            Ok(e) => e,
+            Err(_) => return,
+        };
+
+        let mut is_project = false;
+        let mut subdirs = Vec::new();
+
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.is_dir() {
+                subdirs.push(path);
+            } else if path.is_file() {
+                if let Some(name) = path.file_name().and_then(|n| n.to_str()) {
+                    if COMPOSE_FILES.contains(&name) {
+                        is_project = true;
+                    }
+                }
+            }
+        }
+
+        if is_project {
+            if let Ok(rel_path) = current.strip_prefix(base) {
+                if let Some(s) = rel_path.to_str() {
+                    if !s.is_empty() {
+                        services.push(s.replace([std::path::MAIN_SEPARATOR, '/'], "-"));
+                    }
+                }
+            }
+        }
+
+        // Continue searching subdirectories regardless of whether this dir is a project
+        for subdir in subdirs {
+            scan_dir(base, subdir, services);
+        }
+    }
+
+    scan_dir(&ctx.compose_base, ctx.compose_base.clone(), &mut services);
+    services.sort();
+    services.dedup();
+    Ok(services)
+}
+
 pub fn run_systemctl(
     ctx: &Context,
     action: &str,
     services: &[String],
     validate: bool,
 ) -> Result<()> {
-    let services = resolve_services(ctx, services)?;
+    let services = if services.is_empty() && action == "status" {
+        if let Some(service) = detect_service_from_cwd(ctx) {
+            vec![service]
+        } else {
+            find_all_services(ctx)?
+        }
+    } else {
+        resolve_services(ctx, services)?
+    };
+
+    if services.is_empty() && action == "status" {
+        println!("No services found.");
+        return Ok(());
+    }
 
     if validate {
         validate_compose_dirs(ctx, &services)?;
@@ -157,6 +235,21 @@ pub fn run_systemctl(
 
     println!("Running: {:?}", cmd);
     let status = cmd.status().context("Failed to execute systemctl")?;
+
+    // If the action was start, stop or restart, show status afterwards
+    if action == "start" || action == "stop" || action == "restart" {
+        println!("\nService status:");
+        let mut status_cmd = Command::new(&ctx.systemctl_cmd[0]);
+        if ctx.systemctl_cmd.len() > 1 {
+            status_cmd.args(&ctx.systemctl_cmd[1..]);
+        }
+        status_cmd.args(["status", "-n0", "--no-pager"]);
+        for service in &services {
+            let bare = get_bare_name(service);
+            status_cmd.arg(name_to_service(bare));
+        }
+        let _ = status_cmd.status();
+    }
 
     if !status.success() {
         std::process::exit(status.code().unwrap_or(1));
@@ -218,6 +311,91 @@ pub fn run_list(ctx: &Context) -> Result<()> {
     Ok(())
 }
 
+pub fn run_ps(_ctx: &Context, _services: &[String]) -> Result<()> {
+    let mut cmd = Command::new("docker");
+    cmd.args(["ps", "--all", "--format", "{{json .}}"]);
+
+    let output = cmd.output().context("Failed to run docker ps")?;
+    if !output.status.success() {
+        bail!(
+            "Error running docker ps: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let mut containers = Vec::new();
+
+    for line in stdout.lines() {
+        if line.trim().is_empty() {
+            continue;
+        }
+        let c: DockerContainer = 
+            serde_json::from_str(line).context("Failed to parse docker ps JSON output")?;
+        containers.push(c);
+    }
+
+    if containers.is_empty() {
+        println!("No containers found.");
+        return Ok(())
+    }
+
+    let headers = vec![
+        "ID",
+        "NAME",
+        "IMAGE/TAG",
+        "CREATED",
+        "STATE",
+        "STATUS",
+        "PORTS",
+    ];
+    let mut widths = headers.iter().map(|h| h.len()).collect::<Vec<_>>();
+    let mut data = Vec::new();
+
+    for c in containers {
+        // Handle "2026-01-23 22:30:00 +0700 WIB" or "2026-01-23 22:30:00 +0700" or already ISO
+        let iso_created = if c.created_at.contains(' ') {
+            let parts: Vec<&str> = c.created_at.split_whitespace().collect();
+            if parts.len() >= 3 {
+                // "2026-01-23", "22:30:00", "+0700" -> "2026-01-23T22:30:00+0700"
+                format!("{}T{}{}", parts[0], parts[1], parts[2])
+            } else if parts.len() == 2 {
+                // "2026-01-23", "22:30:00" -> "2026-01-23T22:30:00"
+                format!("{}T{}", parts[0], parts[1])
+            } else {
+                c.created_at.replace(' ', "T")
+            }
+        } else {
+            c.created_at
+        };
+
+        let row = vec![c.id, c.names, c.image, iso_created, c.state, c.status, c.ports];
+
+        for (i, val) in row.iter().enumerate() {
+            if val.len() > widths[i] {
+                widths[i] = val.len();
+            }
+        }
+        data.push(row);
+    }
+
+    // Print header
+    for (i, h) in headers.iter().enumerate() {
+        print!("{:<width$}  ", h, width = widths[i]);
+    }
+    println!();
+
+    // Print rows
+    for row in data {
+        for (i, val) in row.iter().enumerate() {
+            print!("{:<width$}  ", val, width = widths[i]);
+        }
+        println!();
+    }
+
+    Ok(())
+}
+
 pub fn run_logs(ctx: &Context, service: &str, follow: bool, lines: Option<usize>) -> Result<()> {
     let service = resolve_service(ctx, service)?;
 
@@ -231,10 +409,12 @@ pub fn run_logs(ctx: &Context, service: &str, follow: bool, lines: Option<usize>
 
     if follow {
         cmd.arg("-f");
+    } else {
+        cmd.arg("-e");
     }
-    if let Some(n) = lines {
-        cmd.arg("-n").arg(n.to_string());
-    }
+
+    let n = lines.unwrap_or(100);
+    cmd.arg("-n").arg(n.to_string());
 
     println!("Running: {:?}", cmd);
     cmd.status().context("Failed to run logs")?;
@@ -265,7 +445,7 @@ fn ensure_symlink(ctx: &Context, name: &str) -> Result<()> {
 
     // Only needed for nested directories
     if !dir_path.contains('/') {
-        return Ok(());
+        return Ok(())
     }
 
     let flat_name = bare.replace('/', "-");
@@ -278,7 +458,7 @@ fn ensure_symlink(ctx: &Context, name: &str) -> Result<()> {
         if current_target == target_path
             || current_target.as_path() == std::path::Path::new(&dir_path)
         {
-            return Ok(());
+            return Ok(())
         }
         // Wrong target, remove and recreate
         fs::remove_file(&symlink_path)?;

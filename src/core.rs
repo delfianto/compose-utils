@@ -22,11 +22,12 @@ pub fn get_context() -> Result<Context> {
 
     if is_root {
         let _ = detect_and_validate_mode(true, &HashMap::new())?;
-        
+
         let env_file = PathBuf::from(constants::ROOT_ENV_DIR).join(constants::ENV_FILE_NAME);
         let config = read_env_file(&env_file)?;
-        
-        let compose_base = config.get("COMPOSE_BASE")
+
+        let compose_base = config
+            .get("COMPOSE_BASE")
             .map(PathBuf::from)
             .unwrap_or_else(|| PathBuf::from(constants::ROOT_COMPOSE_BASE));
 
@@ -55,7 +56,8 @@ pub fn get_context() -> Result<Context> {
         let env_file = xdg_config.join(constants::ENV_FILE_NAME);
         let config = read_env_file(&env_file)?;
 
-        let compose_base = config.get("COMPOSE_BASE")
+        let compose_base = config
+            .get("COMPOSE_BASE")
             .map(PathBuf::from)
             .unwrap_or_else(|| base_dirs.home_dir().join(constants::USER_COMPOSE_BASE_NAME));
 
@@ -76,8 +78,8 @@ pub fn read_env_file(path: &Path) -> Result<HashMap<String, String>> {
         return Ok(config);
     }
 
-    let content = fs::read_to_string(path)
-        .with_context(|| format!("Failed to read {}", path.display()))?;
+    let content =
+        fs::read_to_string(path).with_context(|| format!("Failed to read {}", path.display()))?;
 
     for line in content.lines() {
         let line = line.trim();
@@ -142,7 +144,7 @@ mod tests {
     fn test_read_env_file_success() {
         let temp_dir = std::env::temp_dir();
         let file_path = temp_dir.join(format!("compose_test_{}.env", std::process::id()));
-        
+
         // Ensure cleanup
         struct Cleanup(PathBuf);
         impl Drop for Cleanup {
@@ -160,7 +162,10 @@ mod tests {
 
         let config = read_env_file(&file_path).unwrap();
 
-        assert_eq!(config.get("COMPOSE_BASE"), Some(&"/tmp/test_base".to_string()));
+        assert_eq!(
+            config.get("COMPOSE_BASE"),
+            Some(&"/tmp/test_base".to_string())
+        );
         assert_eq!(config.get("ANOTHER_VAR"), Some(&"some_value".to_string()));
         assert_eq!(config.get("SPACED_VAR"), Some(&"spaced value".to_string()));
     }
@@ -168,10 +173,13 @@ mod tests {
     #[test]
     fn test_read_env_file_not_found() {
         let temp_dir = std::env::temp_dir();
-        let file_path = temp_dir.join(format!("compose_test_nonexistent_{}.env", std::process::id()));
+        let file_path = temp_dir.join(format!(
+            "compose_test_nonexistent_{}.env",
+            std::process::id()
+        ));
         // Ensure it doesn't exist
         let _ = std::fs::remove_file(&file_path);
-        
+
         let config = read_env_file(&file_path).unwrap();
         assert!(config.is_empty());
     }
