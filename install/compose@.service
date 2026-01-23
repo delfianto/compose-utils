@@ -2,6 +2,8 @@
 Description=Compose Service for %i
 Wants=docker.service
 After=docker.service
+StartLimitBurst=5
+StartLimitIntervalSec=100
 
 [Service]
 Type=simple

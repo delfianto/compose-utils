@@ -1,17 +1,11 @@
 use crate::core::Context;
+use crate::constants::COMPOSE_FILES;
 use anyhow::{Context as _, Result, bail};
 use std::env;
 use std::fs;
 use std::os::unix::fs::symlink;
 use std::path::PathBuf;
 use std::process::Command;
-
-const COMPOSE_FILES: &[&str] = &[
-    "compose.yaml",
-    "compose.yml",
-    "docker-compose.yaml",
-    "docker-compose.yml",
-];
 
 /// Convert project name to directory path.
 /// Handles both flat names (test-project) and nested names (genai-ollama -> genai/ollama).

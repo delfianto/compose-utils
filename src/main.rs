@@ -2,6 +2,7 @@ use anyhow::Result;
 use clap::{Parser, Subcommand};
 
 mod commands;
+mod constants;
 mod core;
 
 use crate::commands::{config, deps, manage};

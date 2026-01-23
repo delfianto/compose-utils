@@ -1,4 +1,5 @@
-use crate::core::Context;
+use crate::core::{Context, read_env_file};
+use crate::constants::CONFIG_KEYS;
 use anyhow::{Context as _, Result, bail};
 use clap::Args;
 use regex::Regex;
@@ -7,15 +8,6 @@ use std::fs;
 use std::net::ToSocketAddrs;
 use std::path::Path;
 use url::Url;
-
-const CONFIG_KEYS: &[&str] = &[
-    "COMPOSE_DATA",
-    "COMPOSE_BASE",
-    "TRAEFIK_ACME_DOMAIN",
-    "TRAEFIK_ACME_EMAIL",
-    "TRAEFIK_ACME_SERVER",
-    "DOCKER_HOST",
-];
 
 #[derive(Args)]
 pub struct ConfigArgs {
@@ -59,26 +51,7 @@ impl ConfigArgs {
 
 /// Read the compose.env file and return a map of key-value pairs.
 fn read_config(ctx: &Context) -> Result<HashMap<String, String>> {
-    let mut config = HashMap::new();
-
-    if !ctx.env_file.exists() {
-        return Ok(config);
-    }
-
-    let content = fs::read_to_string(&ctx.env_file)
-        .with_context(|| format!("Failed to read {}", ctx.env_file.display()))?;
-
-    for line in content.lines() {
-        let line = line.trim();
-        if line.is_empty() || line.starts_with('#') {
-            continue;
-        }
-        if let Some((key, value)) = line.split_once('=') {
-            config.insert(key.trim().to_string(), value.trim().to_string());
-        }
-    }
-
-    Ok(config)
+    read_env_file(&ctx.env_file)
 }
 
 /// Write the config back to the compose.env file.
