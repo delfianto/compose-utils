@@ -108,22 +108,22 @@ async fn main() -> Result<()> {
     let ctx = get_context()?;
 
     match cli.command {
-        Commands::Start { services } => commands::run_start(&ctx, &services),
-        Commands::Stop { services } => commands::run_stop(&ctx, &services),
-        Commands::Restart { services } => commands::run_restart(&ctx, &services),
+        Commands::Start { services } => commands::run_start(&ctx, &services).await,
+        Commands::Stop { services } => commands::run_stop(&ctx, &services).await,
+        Commands::Restart { services } => commands::run_restart(&ctx, &services).await,
         Commands::Update { services } => commands::run_update(&ctx, &services).await,
         Commands::Pull { services } => commands::run_pull(&ctx, &services).await,
-        Commands::Status { services } => commands::run_systemctl(&ctx, "status", &services, false),
-        Commands::Enable { services } => commands::run_enable(&ctx, &services),
-        Commands::Disable { services } => commands::run_disable(&ctx, &services),
-        Commands::List => commands::run_list(&ctx),
+        Commands::Status { services } => commands::run_status(&ctx, &services).await,
+        Commands::Enable { services } => commands::run_enable(&ctx, &services).await,
+        Commands::Disable { services } => commands::run_disable(&ctx, &services).await,
+        Commands::List => commands::run_list(&ctx).await,
         Commands::Ps { services } => commands::ps::run_ps(&ctx, &services).await,
         Commands::Logs {
             service,
             follow,
             lines,
-        } => commands::run_logs(&ctx, service.as_deref().unwrap_or(""), follow, lines),
-        Commands::Deps(args) => deps::run(&ctx, args),
+        } => commands::run_logs(&ctx, service.as_deref().unwrap_or(""), follow, lines).await,
+        Commands::Deps(args) => deps::run(&ctx, args).await,
         Commands::Config(args) => config::run(&ctx, args),
     }
 }

@@ -1,9 +1,7 @@
 //! Logic for interacting with systemd services and resolving service names.
 
 use crate::core::Context;
-use anyhow::{Context as _, Result};
 use std::path::PathBuf;
-use std::process::Command;
 
 /// Converts a project name to its corresponding directory path.
 ///
@@ -70,55 +68,6 @@ pub fn get_compose_dir(ctx: &Context, name: &str) -> PathBuf {
     ctx.compose_base.join(dir_path)
 }
 
-/// Invokes `systemctl` for a set of services.
-///
-/// Automatically handles both root and rootless (user) systemd instances
-/// based on the [`Context`].
-///
-/// # Arguments
-///
-/// * `ctx` - The application context.
-/// * `action` - The systemctl action to perform (e.g., "start", "stop", "status").
-/// * `services` - A list of service names.
-///
-/// # Errors
-///
-/// Returns an error if the `systemctl` command fails to execute or returns a non-zero exit code.
-pub fn run_systemctl(ctx: &Context, action: &str, services: &[String]) -> Result<()> {
-    let mut cmd = Command::new(&ctx.systemctl_cmd[0]);
-    if ctx.systemctl_cmd.len() > 1 {
-        cmd.args(&ctx.systemctl_cmd[1..]);
-    }
-    cmd.arg(action);
-
-    for service in services {
-        let bare = get_bare_name(service);
-        cmd.arg(name_to_service(bare));
-    }
-
-    println!("Running: {:?}", cmd);
-    let status = cmd.status().context("Failed to execute systemctl")?;
-
-    if action == "start" || action == "stop" || action == "restart" {
-        println!("\nService status:");
-        let mut status_cmd = Command::new(&ctx.systemctl_cmd[0]);
-        if ctx.systemctl_cmd.len() > 1 {
-            status_cmd.args(&ctx.systemctl_cmd[1..]);
-        }
-        status_cmd.args(["status", "-n0", "--no-pager"]);
-        for service in services {
-            let bare = get_bare_name(service);
-            status_cmd.arg(name_to_service(bare));
-        }
-        let _ = status_cmd.status();
-    }
-
-    if !status.success() {
-        std::process::exit(status.code().unwrap_or(1));
-    }
-    Ok(())
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -130,7 +79,6 @@ mod tests {
         Context {
             is_root: false,
             systemd_dir: PathBuf::from("/tmp/test-systemd"),
-            systemctl_cmd: vec!["systemctl".to_string(), "--user".to_string()],
             compose_base: compose_base.to_path_buf(),
             env_file: PathBuf::from("/tmp/test-compose.env"),
             docker_host: None,

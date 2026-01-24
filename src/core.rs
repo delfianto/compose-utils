@@ -1,4 +1,4 @@
-use anyhow::{Context as _, Result, bail};
+use anyhow::{bail, Context as _, Result};
 use directories::BaseDirs;
 use nix::unistd::{geteuid, getuid};
 use std::collections::HashMap;
@@ -18,8 +18,6 @@ pub struct Context {
     pub is_root: bool,
     /// Path to the directory where systemd unit files are stored.
     pub systemd_dir: PathBuf,
-    /// The base command and arguments used to invoke systemctl.
-    pub systemctl_cmd: Vec<String>,
     /// Base directory where docker-compose projects are located.
     pub compose_base: PathBuf,
     /// Path to the environment configuration file (compose.env).
@@ -34,7 +32,7 @@ pub struct Context {
 /// 1. Detects if running as root or a normal user.
 /// 2. Validates the environment (e.g., presence of docker sockets).
 /// 3. Reads the global or user-specific environment file.
-/// 4. Constructs the [`Context`] with appropriate paths and commands.
+/// 4. Constructs the [`Context`] with appropriate paths.
 ///
 /// # Errors
 ///
@@ -61,7 +59,6 @@ pub fn get_context() -> Result<Context> {
         Ok(Context {
             is_root: true,
             systemd_dir: PathBuf::from(constants::ROOT_SYSTEMD_DIR),
-            systemctl_cmd: vec![constants::SYSTEMCTL_CMD.to_string()],
             compose_base,
             env_file,
             docker_host,
@@ -94,7 +91,6 @@ pub fn get_context() -> Result<Context> {
         Ok(Context {
             is_root: false,
             systemd_dir: xdg_config.join(constants::USER_SYSTEMD_DIR_REL),
-            systemctl_cmd: vec![constants::SYSTEMCTL_CMD.to_string(), "--user".to_string()],
             compose_base,
             env_file,
             docker_host,

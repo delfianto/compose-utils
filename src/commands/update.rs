@@ -1,28 +1,12 @@
 //! Logic for the `update` command.
 
-use super::service::run_systemctl;
+use super::service::run_restart;
 use crate::core::Context;
 use anyhow::Result;
 use colored::*;
 use std::collections::HashMap;
 
 /// Executes the `update` command to pull images and restart services if changes are detected.
-///
-/// This function:
-/// 1. Identifies images used by specified services.
-/// 2. Records current image digests.
-/// 3. Pulls latest images from registries.
-/// 4. Compares old and new digests.
-/// 5. Restarts systemd units only for services whose images have been updated.
-///
-/// # Arguments
-///
-/// * `ctx` - The application context.
-/// * `services` - A list of service names to check for updates.
-///
-/// # Errors
-///
-/// Returns an error if service resolution, image operations, or systemd restarts fail.
 pub async fn run_update(ctx: &Context, services: &[String]) -> Result<()> {
     let docker = crate::docker::connect_docker(ctx)?;
 
@@ -43,20 +27,22 @@ pub async fn run_update(ctx: &Context, services: &[String]) -> Result<()> {
             continue;
         }
 
-        let mut pre_pull_hashes = HashMap::new();
+        let mut pre_pull_hashes: HashMap<String, Option<String>> = HashMap::new();
         for image in &images {
             let hash = crate::docker::images::get_image_digest(&docker, image).await;
             pre_pull_hashes.insert(image.clone(), hash);
         }
 
-        crate::docker::images::pull_images(&docker, &images).await?;
+        for image in &images {
+            crate::docker::images::pull_image_with_progress(&docker, image).await?;
+        }
 
         let mut updated = false;
         for image in &images {
-            let old_hash = pre_pull_hashes.get(image).unwrap_or(&None);
+            let old_hash = pre_pull_hashes.get(image).and_then(|h| h.as_ref());
             let new_hash = crate::docker::images::get_image_digest(&docker, image).await;
 
-            match (old_hash, &new_hash) {
+            match (old_hash, new_hash.as_ref()) {
                 (Some(old), Some(new)) if old != new => {
                     println!(
                         "{} Image updated: {} ({} -> {})",
@@ -89,7 +75,7 @@ pub async fn run_update(ctx: &Context, services: &[String]) -> Result<()> {
 
     if !services_to_restart.is_empty() {
         println!("\nRestarting updated services...");
-        run_systemctl(ctx, "restart", &services_to_restart, false)?;
+        run_restart(ctx, &services_to_restart).await?;
         println!(
             "{} Updated and restarted {} service(s).",
             "OK".green(),
@@ -103,13 +89,8 @@ pub async fn run_update(ctx: &Context, services: &[String]) -> Result<()> {
 }
 
 /// Truncates a long hash string (like a Docker image ID) for more concise display.
-///
-/// # Arguments
-///
-/// * `hash` - The full hash string.
-///
-/// Returns a string truncated to 12 characters (if longer).
 fn shorten_hash(hash: &str) -> String {
+    let hash = hash.strip_prefix("sha256:").unwrap_or(hash);
     if hash.len() > 12 {
         hash[..12].to_string()
     } else {
@@ -123,7 +104,7 @@ mod tests {
 
     #[test]
     fn test_shorten_hash() {
-        assert_eq!(shorten_hash("sha256:abc123def456xyz789"), "sha256:abc12");
+        assert_eq!(shorten_hash("sha256:abc123def456xyz789"), "abc123def456");
         assert_eq!(shorten_hash("short"), "short");
     }
 }

@@ -8,7 +8,7 @@ pub mod images;
 pub mod types;
 
 use crate::core::Context;
-use anyhow::{Context as _, Result, bail};
+use anyhow::{bail, Context as _, Result};
 use bollard::Docker;
 
 /// Establishes a connection to the Docker daemon based on the provided [`Context`].

@@ -3,10 +3,8 @@
 use super::service::{get_bare_name, get_compose_dir};
 use crate::constants::COMPOSE_FILES;
 use crate::core::Context;
-use anyhow::{Result, bail};
+use anyhow::{bail, Result};
 use std::env;
-use std::fs;
-use std::path::{Path, PathBuf};
 
 /// Attempts to detect a service name based on the current working directory.
 ///
@@ -121,64 +119,6 @@ pub fn validate_compose_dirs(ctx: &Context, services: &[String]) -> Result<()> {
     Ok(())
 }
 
-/// Scans the `compose_base` directory to find all managed services.
-///
-/// A service is identified by a directory containing a valid Docker Compose file.
-///
-/// # Arguments
-///
-/// * `ctx` - The application context.
-///
-/// # Errors
-///
-/// Returns an error if scanning fails.
-pub fn find_all_services(ctx: &Context) -> Result<Vec<String>> {
-    let mut services = Vec::new();
-    if !ctx.compose_base.exists() {
-        return Ok(services);
-    }
-
-    /// Recursively scans a directory for compose projects.
-    fn scan_dir(base: &Path, current: PathBuf, services: &mut Vec<String>) {
-        let entries = match fs::read_dir(&current) {
-            Ok(e) => e,
-            Err(_) => return,
-        };
-
-        let mut is_project = false;
-        let mut subdirs = Vec::new();
-
-        for entry in entries.flatten() {
-            let path = entry.path();
-            if path.is_dir() {
-                subdirs.push(path);
-            } else if path.is_file()
-                && let Some(name) = path.file_name().and_then(|n| n.to_str())
-                && COMPOSE_FILES.contains(&name)
-            {
-                is_project = true;
-            }
-        }
-
-        if is_project
-            && let Ok(rel_path) = current.strip_prefix(base)
-            && let Some(s) = rel_path.to_str()
-            && !s.is_empty()
-        {
-            services.push(s.replace([std::path::MAIN_SEPARATOR, '/'], "-"));
-        }
-
-        for subdir in subdirs {
-            scan_dir(base, subdir, services);
-        }
-    }
-
-    scan_dir(&ctx.compose_base, ctx.compose_base.clone(), &mut services);
-    services.sort();
-    services.dedup();
-    Ok(services)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -189,7 +129,6 @@ mod tests {
         Context {
             is_root: false,
             systemd_dir: PathBuf::from("/tmp/test-systemd"),
-            systemctl_cmd: vec!["systemctl".to_string(), "--user".to_string()],
             compose_base: compose_base.to_path_buf(),
             env_file: PathBuf::from("/tmp/test-compose.env"),
             docker_host: None,

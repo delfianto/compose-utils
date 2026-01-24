@@ -16,9 +16,6 @@ pub const USER_SYSTEMD_DIR_REL: &str = "systemd/user";
 /// Name of the Docker socket file in rootless mode.
 pub const USER_DOCKER_SOCKET_NAME: &str = "docker.sock";
 
-/// The command name used to invoke systemd's controller.
-pub const SYSTEMCTL_CMD: &str = "systemctl";
-
 /// List of standard filenames recognized as Docker Compose configuration files.
 pub const COMPOSE_FILES: &[&str] = &[
     "compose.yaml",

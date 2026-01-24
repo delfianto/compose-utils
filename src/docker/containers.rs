@@ -2,8 +2,8 @@
 
 use super::types::{ContainerInfo, PortInfo};
 use anyhow::{Context, Result};
-use bollard::Docker;
 use bollard::query_parameters::ListContainersOptions;
+use bollard::Docker;
 
 /// Retrieves a list of all Docker containers and transforms them into domain types.
 ///

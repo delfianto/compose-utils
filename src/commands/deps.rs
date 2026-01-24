@@ -1,12 +1,12 @@
 //! Logic for managing dependencies between systemd services using drop-in overrides.
 
 use crate::core::Context;
-use anyhow::{Context as _, Result};
+use crate::systemd::client::SystemdClient;
+use anyhow::Result;
 use clap::Args;
 use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::process::Command;
 
 /// Command-line arguments for the `deps` subcommand.
 #[derive(Args)]
@@ -38,11 +38,11 @@ pub struct DepsArgs {
 ///
 /// * `ctx` - The application context.
 /// * `args` - The parsed command arguments.
-pub fn run(ctx: &Context, args: DepsArgs) -> Result<()> {
+pub async fn run(ctx: &Context, args: DepsArgs) -> Result<()> {
     if let Some(deps) = &args.add {
-        add_deps(ctx, &args.service, deps, args.requires)
+        add_deps(ctx, &args.service, deps, args.requires).await
     } else if let Some(deps) = &args.remove {
-        remove_deps(ctx, &args.service, deps)
+        remove_deps(ctx, &args.service, deps).await
     } else {
         list_deps(ctx, &args.service)
     }
@@ -139,7 +139,12 @@ fn write_override_file(override_file: &Path, deps: &SystemdDeps) -> Result<()> {
 }
 
 /// Logic for the `add` action.
-fn add_deps(ctx: &Context, service: &str, deps_to_add: &[String], requires: bool) -> Result<()> {
+async fn add_deps(
+    ctx: &Context,
+    service: &str,
+    deps_to_add: &[String],
+    requires: bool,
+) -> Result<()> {
     let override_dir = get_override_dir(ctx, service);
     let override_file = get_override_file(ctx, service);
 
@@ -165,18 +170,14 @@ fn add_deps(ctx: &Context, service: &str, deps_to_add: &[String], requires: bool
     write_override_file(&override_file, &current_deps)?;
     println!("Added dependencies to {}", service);
 
-    let mut cmd = Command::new(&ctx.systemctl_cmd[0]);
-    if ctx.systemctl_cmd.len() > 1 {
-        cmd.args(&ctx.systemctl_cmd[1..]);
-    }
-    cmd.arg("daemon-reload");
-    cmd.status().context("Failed to reload daemon")?;
+    let systemd = SystemdClient::new(!ctx.is_root).await?;
+    systemd.reload_daemon().await?;
 
     Ok(())
 }
 
 /// Logic for the `remove` action.
-fn remove_deps(ctx: &Context, service: &str, deps_to_remove: &[String]) -> Result<()> {
+async fn remove_deps(ctx: &Context, service: &str, deps_to_remove: &[String]) -> Result<()> {
     let override_file = get_override_file(ctx, service);
     if !override_file.exists() {
         println!("No dependencies to remove");
@@ -189,10 +190,10 @@ fn remove_deps(ctx: &Context, service: &str, deps_to_remove: &[String]) -> Resul
         let dep_name = get_compose_service_name(dep);
 
         for key in ["Requires", "Wants", "After"] {
-            if let Some(list) = current_deps.get_mut(key)
-                && let Some(pos) = list.iter().position(|x| x == &dep_name)
-            {
-                list.remove(pos);
+            if let Some(list) = current_deps.get_mut(key) {
+                if let Some(pos) = list.iter().position(|x| x == &dep_name) {
+                    list.remove(pos);
+                }
             }
         }
     }
@@ -200,12 +201,8 @@ fn remove_deps(ctx: &Context, service: &str, deps_to_remove: &[String]) -> Resul
     write_override_file(&override_file, &current_deps)?;
     println!("Removed dependencies from {}", service);
 
-    let mut cmd = Command::new(&ctx.systemctl_cmd[0]);
-    if ctx.systemctl_cmd.len() > 1 {
-        cmd.args(&ctx.systemctl_cmd[1..]);
-    }
-    cmd.arg("daemon-reload");
-    cmd.status().context("Failed to reload daemon")?;
+    let systemd = SystemdClient::new(!ctx.is_root).await?;
+    systemd.reload_daemon().await?;
 
     Ok(())
 }
@@ -220,12 +217,12 @@ fn list_deps(ctx: &Context, service: &str) -> Result<()> {
 
     let deps = parse_override_file(&override_file)?;
     for key in ["Requires", "Wants", "After"] {
-        if let Some(v) = deps.get(key)
-            && !v.is_empty()
-        {
-            println!("{}:", key);
-            for item in v {
-                println!("  - {}", item);
+        if let Some(v) = deps.get(key) {
+            if !v.is_empty() {
+                println!("{}:", key);
+                for item in v {
+                    println!("  - {}", item);
+                }
             }
         }
     }

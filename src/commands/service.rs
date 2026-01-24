@@ -1,207 +1,308 @@
-//! High-level command implementations for managing systemd services.
+//! High-level command implementations for managing systemd services via D-Bus.
 
+use crate::compose::project::get_images_for_project;
 use crate::core::Context;
-use anyhow::{Context as _, Result};
-use std::process::Command;
+use crate::docker::connect_docker;
+use crate::docker::images::pull_image_with_progress;
+use crate::systemd::client::SystemdClient;
+use crate::systemd::discovery::{resolve_service, resolve_services};
+use crate::systemd::journal::{JournalReader, LogEntry};
+use crate::systemd::manager::ensure_symlink;
+use crate::systemd::service::{get_bare_name, get_compose_dir, name_to_service};
+use crate::systemd::types::JobResult;
+use anyhow::{bail, Context as _, Result};
 
-/// Orchestrates service-related `systemctl` actions with discovery and validation.
-///
-/// This is a generic wrapper that handles:
-/// 1. Automatic service detection if no services are specified.
-/// 2. Validation of compose project directories.
-/// 3. Execution of the `systemctl` command via [`crate::systemd::service::run_systemctl`].
-///
-/// # Arguments
-///
-/// * `ctx` - The application context.
-/// * `action` - The systemctl action (e.g., "start", "stop", "status").
-/// * `services` - Explicit list of services.
-/// * `validate` - Whether to verify directory existence before running.
-///
-/// # Errors
-///
-/// Returns an error if resolution or execution fails.
-pub fn run_systemctl(
-    ctx: &Context,
-    action: &str,
-    services: &[String],
-    validate: bool,
-) -> Result<()> {
-    let services = if services.is_empty() && action == "status" {
-        if let Some(service) = crate::systemd::discovery::detect_service_from_cwd(ctx) {
-            vec![service]
-        } else {
-            crate::systemd::discovery::find_all_services(ctx)?
+/// Executes the `start` (or `up`) command with smart image pulling.
+pub async fn run_start(ctx: &Context, names: &[String]) -> Result<()> {
+    let systemd = SystemdClient::new(!ctx.is_root).await?;
+    let docker = connect_docker(ctx)?;
+    let services = resolve_services(ctx, names)?;
+
+    for name in services {
+        let bare = get_bare_name(&name);
+        ensure_symlink(ctx, bare)?;
+
+        let compose_dir = get_compose_dir(ctx, bare);
+        let unit_name = name_to_service(bare);
+
+        // 1. Check for required images
+        let images = get_images_for_project(&compose_dir)?;
+
+        if !images.is_empty() {
+            println!("Checking images for {}...", bare);
+            let mut missing = Vec::new();
+            for image in &images {
+                match docker.inspect_image(image).await {
+                    Ok(_) => println!("  {} - present", image),
+                    Err(_) => {
+                        println!("  {} - missing", image);
+                        missing.push(image.clone());
+                    }
+                }
+            }
+
+            // 2. Pull missing images with progress
+            if !missing.is_empty() {
+                println!();
+                for image in &missing {
+                    pull_image_with_progress(&docker, image).await?;
+                }
+                println!();
+            }
         }
-    } else {
-        crate::systemd::discovery::resolve_services(ctx, services)?
-    };
 
-    if services.is_empty() && action == "status" {
+        // 3. Start via D-Bus
+        println!("Starting {}...", unit_name);
+        let job_id = systemd.start_unit(&unit_name).await?;
+
+        // 4. Wait for completion
+        let result = systemd.wait_for_job(job_id).await?;
+
+        // 5. Report result
+        match result {
+            JobResult::Done => {
+                let state = systemd.get_unit_state(&unit_name).await?;
+                println!("Started {} ({:?})", bare, state);
+            }
+            JobResult::Failed => {
+                let log_cmd = if ctx.is_root {
+                    format!("journalctl -u {}", unit_name)
+                } else {
+                    format!("journalctl --user -u {}", unit_name)
+                };
+                bail!("Failed to start {} - check: {}", bare, log_cmd);
+            }
+            other => {
+                bail!("Start job for {} ended with: {:?}", bare, other);
+            }
+        }
+    }
+
+    Ok(())
+}
+
+/// Executes the `stop` (or `down`) command.
+pub async fn run_stop(ctx: &Context, names: &[String]) -> Result<()> {
+    let systemd = SystemdClient::new(!ctx.is_root).await?;
+    let services = resolve_services(ctx, names)?;
+
+    for name in services {
+        let bare = get_bare_name(&name);
+        let unit_name = name_to_service(bare);
+
+        println!("Stopping {}...", unit_name);
+        let job_id = systemd.stop_unit(&unit_name).await?;
+        let result = systemd.wait_for_job(job_id).await?;
+
+        match result {
+            JobResult::Done => println!("Stopped {}", bare),
+            other => bail!("Stop job for {} ended with: {:?}", bare, other),
+        }
+    }
+
+    Ok(())
+}
+
+/// Executes the `restart` (or `reup`) command.
+pub async fn run_restart(ctx: &Context, names: &[String]) -> Result<()> {
+    let systemd = SystemdClient::new(!ctx.is_root).await?;
+    let docker = connect_docker(ctx)?;
+    let services = resolve_services(ctx, names)?;
+
+    for name in services {
+        let bare = get_bare_name(&name);
+        ensure_symlink(ctx, bare)?;
+
+        let compose_dir = get_compose_dir(ctx, bare);
+        let unit_name = name_to_service(bare);
+
+        // Check and pull images before restart
+        let images = get_images_for_project(&compose_dir)?;
+        if !images.is_empty() {
+            let mut missing = Vec::new();
+            for image in &images {
+                if docker.inspect_image(image).await.is_err() {
+                    missing.push(image.clone());
+                }
+            }
+            for image in &missing {
+                pull_image_with_progress(&docker, image).await?;
+            }
+        }
+
+        println!("Restarting {}...", unit_name);
+        let job_id = systemd.restart_unit(&unit_name).await?;
+        let result = systemd.wait_for_job(job_id).await?;
+
+        match result {
+            JobResult::Done => {
+                let state = systemd.get_unit_state(&unit_name).await?;
+                println!("Restarted {} ({:?})", bare, state);
+            }
+            other => bail!("Restart job for {} ended with: {:?}", bare, other),
+        }
+    }
+
+    Ok(())
+}
+
+/// Executes the `list` (or `ls`) command to show all `compose@` units.
+pub async fn run_list(ctx: &Context) -> Result<()> {
+    let systemd = SystemdClient::new(!ctx.is_root).await?;
+    let units = systemd.list_units(Some("compose@")).await?;
+
+    if units.is_empty() {
+        println!("No compose units found.");
+        return Ok(());
+    }
+
+    println!("{:<40} {:<15} {:<15} DESCRIPTION", "UNIT", "ACTIVE", "SUB");
+    for unit in units {
+        println!(
+            "{:<40} {:<15} {:<15} {}",
+            unit.name,
+            format!("{:?}", unit.active_state),
+            format!("{:?}", unit.sub_state),
+            unit.description
+        );
+    }
+
+    Ok(())
+}
+
+/// Executes the `logs` command using native journal integration.
+pub async fn run_logs(
+    ctx: &Context,
+    service: &str,
+    follow: bool,
+    lines: Option<usize>,
+) -> Result<()> {
+    let resolved = resolve_service(ctx, service)?;
+    let bare = get_bare_name(&resolved);
+    let unit_name = name_to_service(bare);
+
+    let mut reader = JournalReader::new()?;
+    let n = lines.unwrap_or(100);
+
+    if follow {
+        // Show history first
+        let entries = reader.logs_for_unit(&unit_name, n)?;
+        for entry in entries {
+            print_entry(&entry);
+        }
+
+        // Then follow
+        reader.follow_unit(&unit_name, |entry| {
+            print_entry(entry);
+            true
+        })?;
+    } else {
+        let entries = reader.logs_for_unit(&unit_name, n)?;
+        for entry in entries {
+            print_entry(&entry);
+        }
+    }
+
+    Ok(())
+}
+
+/// Executes the `status` command for a set of services.
+pub async fn run_status(ctx: &Context, names: &[String]) -> Result<()> {
+    let systemd = SystemdClient::new(!ctx.is_root).await?;
+    let services = resolve_services(ctx, names)?;
+
+    if services.is_empty() {
         println!("No services found.");
         return Ok(());
     }
 
-    if validate {
-        crate::systemd::discovery::validate_compose_dirs(ctx, &services)?;
+    for name in services {
+        let bare = get_bare_name(&name);
+        let unit_name = name_to_service(bare);
+
+        match systemd.get_unit_properties(&unit_name).await {
+            Ok(props) => {
+                println!("● {} - {}", bare, props.description);
+                println!("   Active: {:?} ({:?})", props.state, props.sub_state);
+                if !props.requires.is_empty() {
+                    println!("   Requires: {}", props.requires.join(", "));
+                }
+                if !props.wants.is_empty() {
+                    println!("   Wants: {}", props.wants.join(", "));
+                }
+                println!();
+            }
+            Err(e) => {
+                println!("○ {} - Could not retrieve status: {}", bare, e);
+                println!();
+            }
+        }
     }
 
-    crate::systemd::service::run_systemctl(ctx, action, &services)
-}
-
-/// Executes the `start` (or `up`) command.
-///
-/// # Arguments
-///
-/// * `ctx` - The application context.
-/// * `services` - Services to start.
-pub fn run_start(ctx: &Context, services: &[String]) -> Result<()> {
-    run_systemctl(ctx, "start", services, true)
-}
-
-/// Executes the `stop` (or `down`) command.
-///
-/// # Arguments
-///
-/// * `ctx` - The application context.
-/// * `services` - Services to stop.
-pub fn run_stop(ctx: &Context, services: &[String]) -> Result<()> {
-    run_systemctl(ctx, "stop", services, true)
-}
-
-/// Executes the `restart` (or `reup`) command.
-///
-/// # Arguments
-///
-/// * `ctx` - The application context.
-/// * `services` - Services to restart.
-pub fn run_restart(ctx: &Context, services: &[String]) -> Result<()> {
-    run_systemctl(ctx, "restart", services, true)
-}
-
-/// Executes the `list` (or `ls`) command to show all `compose@` units.
-///
-/// # Arguments
-///
-/// * `ctx` - The application context.
-pub fn run_list(ctx: &Context) -> Result<()> {
-    let mut cmd = Command::new(&ctx.systemctl_cmd[0]);
-    if ctx.systemctl_cmd.len() > 1 {
-        cmd.args(&ctx.systemctl_cmd[1..]);
-    }
-    cmd.args(["list-units", "compose@*.service", "--all"]);
-
-    cmd.status().context("Failed to list units")?;
     Ok(())
 }
 
-/// Executes the `logs` command using `journalctl`.
-///
-/// Automatically determines whether to use `--user` mode.
-///
-/// # Arguments
-///
-/// * `ctx` - The application context.
-/// * `service` - The service name.
-/// * `follow` - Whether to tail the logs (`-f`).
-/// * `lines` - Number of tail lines to show (`-n`).
-///
-/// # Errors
-///
-/// Returns an error if `journalctl` fails.
-pub fn run_logs(ctx: &Context, service: &str, follow: bool, lines: Option<usize>) -> Result<()> {
-    let service = crate::systemd::discovery::resolve_service(ctx, service)?;
+fn print_entry(entry: &LogEntry) {
+    let ts = chrono::DateTime::from_timestamp_micros(entry.timestamp as i64)
+        .map(|dt| dt.format("%b %d %H:%M:%S").to_string())
+        .unwrap_or_default();
 
-    let mut cmd = Command::new("journalctl");
-    if !ctx.is_root {
-        cmd.arg("--user");
-    }
-
-    let bare = crate::systemd::service::get_bare_name(&service);
-    cmd.arg("-u")
-        .arg(crate::systemd::service::name_to_service(bare));
-
-    if follow {
-        cmd.arg("-f");
-    } else {
-        cmd.arg("-e");
-    }
-
-    let n = lines.unwrap_or(100);
-    cmd.arg("-n").arg(n.to_string());
-
-    println!("Running: {:?}", cmd);
-    cmd.status().context("Failed to run logs")?;
-    Ok(())
+    println!("{} {}", ts, entry.message);
 }
 
 /// Executes the `enable` command.
-///
-/// Also ensures that symlinks for nested directories are created.
-///
-/// # Arguments
-///
-/// * `ctx` - The application context.
-/// * `services` - Services to enable.
-pub fn run_enable(ctx: &Context, services: &[String]) -> Result<()> {
-    let services = crate::systemd::discovery::resolve_services(ctx, services)?;
-    crate::systemd::discovery::validate_compose_dirs(ctx, &services)?;
+pub async fn run_enable(ctx: &Context, names: &[String]) -> Result<()> {
+    let services = resolve_services(ctx, names)?;
 
-    for service in &services {
-        crate::systemd::manager::ensure_symlink(ctx, service)?;
+    for name in &services {
+        let bare = get_bare_name(name);
+        ensure_symlink(ctx, bare)?;
     }
 
-    let mut cmd = Command::new(&ctx.systemctl_cmd[0]);
-    if ctx.systemctl_cmd.len() > 1 {
-        cmd.args(&ctx.systemctl_cmd[1..]);
+    let mut cmd = std::process::Command::new("systemctl");
+    if !ctx.is_root {
+        cmd.arg("--user");
     }
     cmd.arg("enable");
 
-    for service in &services {
-        let bare = crate::systemd::service::get_bare_name(service);
-        cmd.arg(crate::systemd::service::name_to_service(bare));
+    for name in &services {
+        let bare = get_bare_name(name);
+        cmd.arg(name_to_service(bare));
     }
 
-    println!("Running: {:?}", cmd);
-    let status = cmd.status().context("Failed to execute systemctl")?;
-
+    let status = cmd.status().context("Failed to enable units")?;
     if !status.success() {
-        std::process::exit(status.code().unwrap_or(1));
+        bail!("Failed to enable units");
     }
+
     Ok(())
 }
 
 /// Executes the `disable` command.
-///
-/// Also removes associated symlinks for nested directories.
-///
-/// # Arguments
-///
-/// * `ctx` - The application context.
-/// * `services` - Services to disable.
-pub fn run_disable(ctx: &Context, services: &[String]) -> Result<()> {
-    let services = crate::systemd::discovery::resolve_services(ctx, services)?;
+pub async fn run_disable(ctx: &Context, names: &[String]) -> Result<()> {
+    let services = resolve_services(ctx, names)?;
 
-    let mut cmd = Command::new(&ctx.systemctl_cmd[0]);
-    if ctx.systemctl_cmd.len() > 1 {
-        cmd.args(&ctx.systemctl_cmd[1..]);
+    let mut cmd = std::process::Command::new("systemctl");
+    if !ctx.is_root {
+        cmd.arg("--user");
     }
     cmd.arg("disable");
 
-    for service in &services {
-        let bare = crate::systemd::service::get_bare_name(service);
-        cmd.arg(crate::systemd::service::name_to_service(bare));
+    for name in &services {
+        let bare = get_bare_name(name);
+        cmd.arg(name_to_service(bare));
     }
 
-    println!("Running: {:?}", cmd);
-    let status = cmd.status().context("Failed to execute systemctl")?;
+    let status = cmd.status().context("Failed to disable units")?;
 
-    for service in &services {
-        crate::systemd::manager::remove_symlink(ctx, service)?;
+    for name in &services {
+        let bare = get_bare_name(name);
+        crate::systemd::manager::remove_symlink(ctx, bare)?;
     }
 
     if !status.success() {
-        std::process::exit(status.code().unwrap_or(1));
+        bail!("Failed to disable units");
     }
+
     Ok(())
 }

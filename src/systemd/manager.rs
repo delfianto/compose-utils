@@ -2,7 +2,7 @@
 
 use super::service::{get_bare_name, name_to_dir_path};
 use crate::core::Context;
-use anyhow::{Context as _, Result, bail};
+use anyhow::{bail, Context as _, Result};
 use std::fs;
 use std::os::unix::fs::symlink;
 use std::path::PathBuf;
@@ -100,11 +100,11 @@ pub fn ensure_symlink(ctx: &Context, name: &str) -> Result<()> {
 ///
 /// Returns an error if the symlink exists but cannot be removed.
 pub fn remove_symlink(ctx: &Context, name: &str) -> Result<()> {
-    if let Some(symlink_path) = get_symlink_path(ctx, name)
-        && symlink_path.is_symlink()
-    {
-        println!("Removing symlink: {}", symlink_path.display());
-        fs::remove_file(&symlink_path)?;
+    if let Some(symlink_path) = get_symlink_path(ctx, name) {
+        if symlink_path.is_symlink() {
+            println!("Removing symlink: {}", symlink_path.display());
+            fs::remove_file(&symlink_path)?;
+        }
     }
     Ok(())
 }
@@ -120,7 +120,6 @@ mod tests {
         Context {
             is_root: false,
             systemd_dir: PathBuf::from("/tmp/test-systemd"),
-            systemctl_cmd: vec!["systemctl".to_string()],
             compose_base: compose_base.to_path_buf(),
             env_file: PathBuf::from("/tmp/test.env"),
             docker_host: None,

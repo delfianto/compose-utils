@@ -1,8 +1,8 @@
 //! Logic for viewing and updating the tool's configuration (`compose.env`).
 
 use crate::constants::CONFIG_KEYS;
-use crate::core::{Context, read_env_file};
-use anyhow::{Context as _, Result, bail};
+use crate::core::{read_env_file, Context};
+use anyhow::{bail, Context as _, Result};
 use clap::Args;
 use regex::Regex;
 use std::collections::HashMap;
@@ -315,7 +315,6 @@ mod tests {
             Context {
                 is_root: false,
                 systemd_dir: PathBuf::from("/tmp/test-systemd"),
-                systemctl_cmd: vec!["systemctl".to_string(), "--user".to_string()],
                 compose_base: self.base.clone(),
                 env_file: self.env_file(),
                 docker_host: None,
