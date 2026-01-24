@@ -8,13 +8,11 @@ use crate::systemd::client::SystemdClient;
 use crate::systemd::discovery::{resolve_service, resolve_services};
 use crate::systemd::journal::{JournalReader, LogEntry};
 use crate::systemd::manager::ensure_symlink;
-use crate::systemd::service::{get_bare_name, get_compose_dir, name_to_service};
-use crate::systemd::types::JobResult;
-use anyhow::{bail, Result};
+use crate::systemd::service::{get_bare_name, get_compose_dir, normalize_unit_name};
+use anyhow::Result;
 
 /// Executes the `start` (or `up`) command with smart image pulling.
 pub async fn run_start(ctx: &Context, names: &[String], deps_path: Option<String>) -> Result<()> {
-    let systemd = SystemdClient::new(!ctx.is_root).await?;
     let docker = connect_docker(ctx)?;
     let services = resolve_services(ctx, names)?;
 
@@ -42,7 +40,7 @@ pub async fn run_start(ctx: &Context, names: &[String], deps_path: Option<String
         }
 
         if updated {
-            systemd.reload_daemon().await?;
+            crate::systemd::manager::daemon_reload(ctx)?;
         }
     }
 
@@ -51,7 +49,7 @@ pub async fn run_start(ctx: &Context, names: &[String], deps_path: Option<String
         ensure_symlink(ctx, bare)?;
 
         let compose_dir = get_compose_dir(ctx, bare);
-        let unit_name = name_to_service(bare);
+        let unit_name = normalize_unit_name(ctx, bare);
         let images = get_required_images(&compose_dir)?;
 
         if !images.is_empty() {
@@ -77,27 +75,10 @@ pub async fn run_start(ctx: &Context, names: &[String], deps_path: Option<String
         }
 
         println!("Starting {}...", unit_name);
-        let job_id = systemd.start_unit(&unit_name).await?;
+        crate::systemd::manager::start_unit(ctx, &unit_name)?;
 
-        let result = systemd.wait_for_job(job_id).await?;
-
-        match result {
-            JobResult::Done => {
-                let state = systemd.get_unit_state(&unit_name).await?;
-                println!("Started {} ({:?})", bare, state);
-            }
-            JobResult::Failed => {
-                let log_cmd = if ctx.is_root {
-                    format!("journalctl -u {}", unit_name)
-                } else {
-                    format!("journalctl --user -u {}", unit_name)
-                };
-                bail!("Failed to start {} - check: {}", bare, log_cmd);
-            }
-            other => {
-                bail!("Start job for {} ended with: {:?}", bare, other);
-            }
-        }
+        let state = crate::systemd::manager::get_unit_state(ctx, &unit_name)?;
+        println!("Started {} ({})", bare, state);
     }
 
     Ok(())
@@ -105,21 +86,15 @@ pub async fn run_start(ctx: &Context, names: &[String], deps_path: Option<String
 
 /// Executes the `stop` (or `down`) command.
 pub async fn run_stop(ctx: &Context, names: &[String]) -> Result<()> {
-    let systemd = SystemdClient::new(!ctx.is_root).await?;
     let services = resolve_services(ctx, names)?;
 
     for name in services {
         let bare = get_bare_name(&name);
-        let unit_name = name_to_service(bare);
+        let unit_name = normalize_unit_name(ctx, bare);
 
         println!("Stopping {}...", unit_name);
-        let job_id = systemd.stop_unit(&unit_name).await?;
-        let result = systemd.wait_for_job(job_id).await?;
-
-        match result {
-            JobResult::Done => println!("Stopped {}", bare),
-            other => bail!("Stop job for {} ended with: {:?}", bare, other),
-        }
+        crate::systemd::manager::stop_unit(ctx, &unit_name)?;
+        println!("Stopped {}", bare);
     }
 
     Ok(())
@@ -127,7 +102,6 @@ pub async fn run_stop(ctx: &Context, names: &[String]) -> Result<()> {
 
 /// Executes the `restart` (or `reup`) command.
 pub async fn run_restart(ctx: &Context, names: &[String]) -> Result<()> {
-    let systemd = SystemdClient::new(!ctx.is_root).await?;
     let docker = connect_docker(ctx)?;
     let services = resolve_services(ctx, names)?;
 
@@ -136,7 +110,7 @@ pub async fn run_restart(ctx: &Context, names: &[String]) -> Result<()> {
         ensure_symlink(ctx, bare)?;
 
         let compose_dir = get_compose_dir(ctx, bare);
-        let unit_name = name_to_service(bare);
+        let unit_name = normalize_unit_name(ctx, bare);
 
         let images = get_required_images(&compose_dir)?;
         if !images.is_empty() {
@@ -152,16 +126,10 @@ pub async fn run_restart(ctx: &Context, names: &[String]) -> Result<()> {
         }
 
         println!("Restarting {}...", unit_name);
-        let job_id = systemd.restart_unit(&unit_name).await?;
-        let result = systemd.wait_for_job(job_id).await?;
+        crate::systemd::manager::restart_unit(ctx, &unit_name)?;
 
-        match result {
-            JobResult::Done => {
-                let state = systemd.get_unit_state(&unit_name).await?;
-                println!("Restarted {} ({:?})", bare, state);
-            }
-            other => bail!("Restart job for {} ended with: {:?}", bare, other),
-        }
+        let state = crate::systemd::manager::get_unit_state(ctx, &unit_name)?;
+        println!("Restarted {} ({})", bare, state);
     }
 
     Ok(())
@@ -200,7 +168,7 @@ pub async fn run_logs(
 ) -> Result<()> {
     let resolved = resolve_service(ctx, service)?;
     let bare = get_bare_name(&resolved);
-    let unit_name = name_to_service(bare);
+    let unit_name = normalize_unit_name(ctx, bare);
 
     let mut reader = JournalReader::new()?;
     let n = lines.unwrap_or(100);
@@ -236,7 +204,7 @@ pub async fn run_status(ctx: &Context, names: &[String]) -> Result<()> {
 
     for name in services {
         let bare = get_bare_name(&name);
-        let unit_name = name_to_service(bare);
+        let unit_name = normalize_unit_name(ctx, bare);
 
         crate::systemd::manager::show_status(ctx, &unit_name)?;
         println!();
@@ -255,7 +223,6 @@ fn print_entry(entry: &LogEntry) {
 
 /// Executes the `enable` command.
 pub async fn run_enable(ctx: &Context, names: &[String], deps_path: Option<String>) -> Result<()> {
-    let systemd = SystemdClient::new(!ctx.is_root).await?;
     let services = resolve_services(ctx, names)?;
 
     if let Some(path) = deps_path {
@@ -281,7 +248,7 @@ pub async fn run_enable(ctx: &Context, names: &[String], deps_path: Option<Strin
         }
 
         if updated {
-            systemd.reload_daemon().await?;
+            crate::systemd::manager::daemon_reload(ctx)?;
         }
     }
 
@@ -289,9 +256,9 @@ pub async fn run_enable(ctx: &Context, names: &[String], deps_path: Option<Strin
         let bare = get_bare_name(name);
         ensure_symlink(ctx, bare)?;
 
-        let unit_name = name_to_service(bare);
+        let unit_name = normalize_unit_name(ctx, bare);
         println!("Enabling {}...", unit_name);
-        systemd.enable_unit(&unit_name).await?;
+        crate::systemd::manager::enable_unit(ctx, &unit_name)?;
     }
 
     Ok(())
@@ -299,15 +266,14 @@ pub async fn run_enable(ctx: &Context, names: &[String], deps_path: Option<Strin
 
 /// Executes the `disable` command.
 pub async fn run_disable(ctx: &Context, names: &[String]) -> Result<()> {
-    let systemd = SystemdClient::new(!ctx.is_root).await?;
     let services = resolve_services(ctx, names)?;
 
     for name in &services {
         let bare = get_bare_name(name);
-        let unit_name = name_to_service(bare);
+        let unit_name = normalize_unit_name(ctx, bare);
 
         println!("Disabling {}...", unit_name);
-        systemd.disable_unit(&unit_name).await?;
+        crate::systemd::manager::disable_unit(ctx, &unit_name)?;
         crate::systemd::manager::remove_symlink(ctx, bare)?;
     }
 

@@ -26,7 +26,6 @@ pub fn render_containers_table(containers: Vec<ContainerInfo>) {
         "UPTIME",
         "PORTS",
         "STATE",
-        "HEALTH",
     ];
 
     /// Internal structure representing a processed row of data.
@@ -37,8 +36,7 @@ pub fn render_containers_table(containers: Vec<ContainerInfo>) {
         created: String,
         uptime: String,
         ports: Vec<String>,
-        state: String,
-        health: String,
+        state_combined: String,
     }
     let mut data: Vec<RowData> = Vec::new();
 
@@ -74,7 +72,8 @@ pub fn render_containers_table(containers: Vec<ContainerInfo>) {
         let (uptime, health) = parse_status_uptime_health(status);
 
         let state_str = c.state.as_deref().unwrap_or("unknown").to_lowercase();
-        let state = state_to_emoji(&state_str).to_string();
+        let state_emoji = state_to_emoji(&state_str);
+        let state_combined = format!("{}  {}", state_emoji, health);
 
         let ports: Vec<String> = c.ports.iter().map(format_port).collect();
 
@@ -94,13 +93,12 @@ pub fn render_containers_table(containers: Vec<ContainerInfo>) {
             created,
             uptime,
             ports,
-            state,
-            health,
+            state_combined,
         });
     }
 
     print!(
-        "{:<w_id$}  {:<w_name$}  {:<w_image$}  {:<w_created$}  {:<w_uptime$}  {:<w_ports$}  STATE  HEALTH",
+        "{:<w_id$}  {:<w_name$}  {:<w_image$}  {:<w_created$}  {:<w_uptime$}  {:<w_ports$}  STATE",
         headers[0], headers[1], headers[2], headers[3], headers[4], headers[5]
     );
     println!();
@@ -111,8 +109,8 @@ pub fn render_containers_table(containers: Vec<ContainerInfo>) {
         let first_port = row.ports.first().map(|s| s.as_str()).unwrap_or("");
 
         print!(
-            "{:<w_id$}  {:<w_name$}  {:<w_image$}  {:<w_created$}  {:<w_uptime$}  {:<w_ports$}  {}     {}",
-            row.id, row.name, row.image, row.created, row.uptime, first_port, row.state, row.health
+            "{:<w_id$}  {:<w_name$}  {:<w_image$}  {:<w_created$}  {:<w_uptime$}  {:<w_ports$}  {}",
+            row.id, row.name, row.image, row.created, row.uptime, first_port, row.state_combined
         );
         println!();
 

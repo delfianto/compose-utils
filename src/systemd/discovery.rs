@@ -253,12 +253,13 @@ mod tests {
 
     #[test]
     fn test_roundtrip_simple_name() {
-        use super::super::service::name_to_service;
+        use super::super::service::normalize_unit_name;
         let test_dir = TestDir::new("roundtrip-simple");
         test_dir.create_dir("myapp");
         let ctx = test_context(test_dir.path());
 
-        let service_name = name_to_service("myapp");
+        let initial_bare = "myapp";
+        let service_name = normalize_unit_name(&ctx, initial_bare);
         assert_eq!(service_name, "compose@myapp.service");
 
         let bare = get_bare_name(&service_name);
@@ -270,12 +271,12 @@ mod tests {
 
     #[test]
     fn test_roundtrip_nested_name() {
-        use super::super::service::name_to_service;
+        use super::super::service::normalize_unit_name;
         let test_dir = TestDir::new("roundtrip-nested");
         test_dir.create_dir("genai/ollama");
         let ctx = test_context(test_dir.path());
 
-        let service_name = name_to_service("genai/ollama");
+        let service_name = normalize_unit_name(&ctx, "genai/ollama");
         assert_eq!(service_name, "compose@genai-ollama.service");
 
         let bare = get_bare_name(&service_name);
@@ -287,12 +288,12 @@ mod tests {
 
     #[test]
     fn test_roundtrip_dash_input_to_nested() {
-        use super::super::service::name_to_service;
+        use super::super::service::normalize_unit_name;
         let test_dir = TestDir::new("roundtrip-dash");
         test_dir.create_dir("genai/ollama");
         let ctx = test_context(test_dir.path());
 
-        let service_name = name_to_service("genai-ollama");
+        let service_name = normalize_unit_name(&ctx, "genai-ollama");
         assert_eq!(service_name, "compose@genai-ollama.service");
 
         let bare = get_bare_name(&service_name);
@@ -304,12 +305,12 @@ mod tests {
 
     #[test]
     fn test_roundtrip_flat_with_dash() {
-        use super::super::service::name_to_service;
+        use super::super::service::normalize_unit_name;
         let test_dir = TestDir::new("roundtrip-flat-dash");
         test_dir.create_dir("my-project");
         let ctx = test_context(test_dir.path());
 
-        let service_name = name_to_service("my-project");
+        let service_name = normalize_unit_name(&ctx, "my-project");
         assert_eq!(service_name, "compose@my-project.service");
 
         let bare = get_bare_name(&service_name);

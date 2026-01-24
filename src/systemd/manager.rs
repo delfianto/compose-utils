@@ -156,6 +156,91 @@ pub fn show_status(ctx: &Context, unit: &str) -> Result<()> {
     Ok(())
 }
 
+/// Enables a systemd unit.
+pub fn enable_unit(ctx: &Context, unit: &str) -> Result<()> {
+    run_systemctl(ctx, "enable", Some(unit))
+}
+
+/// Disables a systemd unit.
+pub fn disable_unit(ctx: &Context, unit: &str) -> Result<()> {
+    run_systemctl(ctx, "disable", Some(unit))
+}
+
+/// Reloads the systemd daemon.
+pub fn daemon_reload(ctx: &Context) -> Result<()> {
+    run_systemctl(ctx, "daemon-reload", None)
+}
+
+/// Returns the active state of a unit.
+pub fn get_unit_state(ctx: &Context, unit: &str) -> Result<String> {
+    use std::process::Command;
+
+    let mut cmd = if ctx.is_root {
+        Command::new("systemctl")
+    } else {
+        let mut c = Command::new("systemctl");
+        c.arg("--user");
+        c
+    };
+
+    let output = cmd
+        .arg("show")
+        .arg("--property=ActiveState")
+        .arg("--value")
+        .arg(unit)
+        .output()?;
+
+    if !output.status.success() {
+        bail!("Failed to get state for {}", unit);
+    }
+
+    Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
+}
+
+/// Starts a systemd unit.
+pub fn start_unit(ctx: &Context, unit: &str) -> Result<()> {
+    run_systemctl(ctx, "start", Some(unit))
+}
+
+/// Stops a systemd unit.
+pub fn stop_unit(ctx: &Context, unit: &str) -> Result<()> {
+    run_systemctl(ctx, "stop", Some(unit))
+}
+
+/// Restarts a systemd unit.
+pub fn restart_unit(ctx: &Context, unit: &str) -> Result<()> {
+    run_systemctl(ctx, "restart", Some(unit))
+}
+
+fn run_systemctl(ctx: &Context, action: &str, unit: Option<&str>) -> Result<()> {
+    use std::process::Command;
+
+    let mut cmd = if ctx.is_root {
+        Command::new("systemctl")
+    } else {
+        let mut c = Command::new("systemctl");
+        c.arg("--user");
+        c
+    };
+
+    cmd.arg(action);
+    if let Some(u) = unit {
+        cmd.arg(u);
+    }
+
+    let status = cmd.status()?;
+
+    if !status.success() {
+        if let Some(u) = unit {
+            bail!("Failed to {} {}: systemctl exited with error", action, u);
+        } else {
+            bail!("Failed to {}: systemctl exited with error", action);
+        }
+    }
+
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

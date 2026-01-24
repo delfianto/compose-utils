@@ -31,17 +31,57 @@ pub fn name_to_dir_path(ctx: &Context, name: &str) -> String {
     name.to_string()
 }
 
-/// Converts a project name to a systemd service unit name.
+/// Normalizes a name into a full systemd unit name.
 ///
-/// Standardizes naming to the `compose@<name>.service` format.
-/// Slashes are replaced with hyphens.
-///
-/// # Arguments
-///
-/// * `name` - The project name.
-pub fn name_to_service(name: &str) -> String {
-    let normalized = name.replace('/', "-");
-    format!("compose@{}.service", normalized)
+/// Handles the following cases:
+/// 1. Already fully qualified (e.g., `compose@myapp.service`) -> Return as is.
+/// 2. Likely standard systemd unit (no slash, contains @ or ends with .service/.target etc) -> Return as is.
+/// 3. Compose project path (e.g., `genai/ollama`) -> `compose@genai-ollama.service`.
+/// 4. Flat name or dashed name -> Check if it exists as a project.
+///    - If project exists (e.g., `genai-ollama` -> `genai/ollama` exists) -> `compose@genai-ollama.service`.
+///    - If project NOT found (e.g., `docker`) -> `<name>.service`.
+pub fn normalize_unit_name(ctx: &Context, name: &str) -> String {
+    // 1. Already fully qualified correctly.
+    if name.starts_with("compose@") && name.ends_with(".service") && !name.contains('/') {
+        return name.to_string();
+    }
+
+    // 2. Likely standard systemd unit (must NOT have slash, as our projects do).
+    if !name.starts_with("compose@")
+        && !name.contains('/')
+        && (name.contains('@')
+            || name.ends_with(".target")
+            || name.ends_with(".socket")
+            || name.ends_with(".timer")
+            || name.ends_with(".service"))
+    {
+        return name.to_string();
+    }
+
+    // 3. Extract the inner part if it has prefixes/suffixes.
+    let mut inner = name;
+    if let Some(stripped) = name.strip_prefix("compose@") {
+        inner = stripped;
+    }
+    // Don't strip .service yet if it's already there and we might want to keep it.
+    // Actually, if it has .service AND we got here, it's either a compose name or a mixed name.
+
+    // 4. Determine if it's a compose project.
+    let bare = inner.strip_suffix(".service").unwrap_or(inner);
+    let potential_dir = name_to_dir_path(ctx, bare);
+    let project_exists = ctx.compose_base.join(&potential_dir).exists();
+
+    if project_exists || bare.contains('/') || name.starts_with("compose@") {
+        let normalized = bare.replace('/', "-");
+        format!("compose@{}.service", normalized)
+    } else {
+        // Fallback for names like "docker" or "database" that are not projects.
+        if inner.ends_with(".service") {
+            inner.to_string()
+        } else {
+            format!("{}.service", inner)
+        }
+    }
 }
 
 /// Extracts the bare project name from a service unit string.
@@ -119,26 +159,82 @@ mod tests {
     }
 
     #[test]
-    fn test_name_to_service_simple() {
-        assert_eq!(name_to_service("myapp"), "compose@myapp.service");
+    fn test_normalize_unit_name_simple() {
+        let test_dir = TestDir::new("norm-simple");
+        test_dir.create_dir("myapp");
+        let ctx = test_context(test_dir.path());
+        assert_eq!(normalize_unit_name(&ctx, "myapp"), "compose@myapp.service");
     }
 
     #[test]
-    fn test_name_to_service_with_dash() {
-        assert_eq!(name_to_service("my-app"), "compose@my-app.service");
-    }
-
-    #[test]
-    fn test_name_to_service_with_slash() {
+    fn test_normalize_unit_name_with_dash() {
+        let test_dir = TestDir::new("norm-dash");
+        test_dir.create_dir("genai/ollama");
+        let ctx = test_context(test_dir.path());
         assert_eq!(
-            name_to_service("genai/ollama"),
+            normalize_unit_name(&ctx, "genai-ollama"),
             "compose@genai-ollama.service"
         );
     }
 
     #[test]
-    fn test_name_to_service_nested_deep() {
-        assert_eq!(name_to_service("a/b/c/d"), "compose@a-b-c-d.service");
+    fn test_normalize_unit_name_with_slash() {
+        let test_dir = TestDir::new("norm-slash");
+        test_dir.create_dir("genai/ollama");
+        let ctx = test_context(test_dir.path());
+        assert_eq!(
+            normalize_unit_name(&ctx, "genai/ollama"),
+            "compose@genai-ollama.service"
+        );
+    }
+
+    #[test]
+    fn test_normalize_unit_name_standard() {
+        let test_dir = TestDir::new("norm-std");
+        let ctx = test_context(test_dir.path());
+        assert_eq!(
+            normalize_unit_name(&ctx, "docker.service"),
+            "docker.service"
+        );
+        assert_eq!(
+            normalize_unit_name(&ctx, "network.target"),
+            "network.target"
+        );
+        assert_eq!(
+            normalize_unit_name(&ctx, "user@1000.service"),
+            "user@1000.service"
+        );
+    }
+
+    #[test]
+    fn test_normalize_unit_name_fallback() {
+        let test_dir = TestDir::new("norm-fallback");
+        let ctx = test_context(test_dir.path());
+        // "docker" is NOT a project, so it should be "docker.service"
+        assert_eq!(normalize_unit_name(&ctx, "docker"), "docker.service");
+        assert_eq!(normalize_unit_name(&ctx, "database"), "database.service");
+    }
+
+    #[test]
+    fn test_normalize_unit_name_redundant() {
+        let test_dir = TestDir::new("norm-red");
+        test_dir.create_dir("myapp");
+        let ctx = test_context(test_dir.path());
+        assert_eq!(
+            normalize_unit_name(&ctx, "compose@myapp.service"),
+            "compose@myapp.service"
+        );
+    }
+
+    #[test]
+    fn test_normalize_unit_name_nested_deep() {
+        let test_dir = TestDir::new("norm-deep");
+        test_dir.create_dir("a/b/c/d");
+        let ctx = test_context(test_dir.path());
+        assert_eq!(
+            normalize_unit_name(&ctx, "a/b/c/d"),
+            "compose@a-b-c-d.service"
+        );
     }
 
     #[test]
