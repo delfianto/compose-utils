@@ -75,6 +75,7 @@ mod tests {
     use std::fs;
     use std::path::{Path, PathBuf};
 
+    /// Creates a mock Context for testing.
     fn test_context(compose_base: &Path) -> Context {
         Context {
             is_root: false,
@@ -85,23 +86,27 @@ mod tests {
         }
     }
 
+    /// Helper struct for managing a temporary directory in tests.
     struct TestDir {
         base: PathBuf,
     }
 
     impl TestDir {
+        /// Creates a new TestDir with a unique name.
         fn new(name: &str) -> Self {
             let base = PathBuf::from(format!("/tmp/compose-test-{}-{}", name, std::process::id()));
             fs::create_dir_all(&base).unwrap();
             Self { base }
         }
 
+        /// Creates a subdirectory within the TestDir.
         fn create_dir(&self, path: &str) -> PathBuf {
             let dir = self.base.join(path);
             fs::create_dir_all(&dir).unwrap();
             dir
         }
 
+        /// Returns the path to the TestDir.
         fn path(&self) -> &Path {
             &self.base
         }

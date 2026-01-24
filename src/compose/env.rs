@@ -29,7 +29,6 @@ pub fn load_env_file(path: &Path) -> Result<HashMap<String, String>> {
             continue;
         }
         if let Some((key, value)) = line.split_once('=') {
-            // Remove potential quotes
             let clean_value = value.trim_matches('"').trim_matches('\'');
             vars.insert(key.trim().to_string(), clean_value.to_string());
         }
@@ -60,6 +59,8 @@ pub fn resolve_env_vars(text: &str, vars: &HashMap<String, String>) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::io::Write;
+    use tempfile::NamedTempFile;
 
     #[test]
     fn test_resolve_env_vars_with_braces() {
@@ -91,7 +92,6 @@ mod tests {
     #[test]
     fn test_resolve_env_vars_missing_var() {
         let vars = HashMap::new();
-        // Missing variables should be kept as-is
         assert_eq!(resolve_env_vars("app:${MISSING}", &vars), "app:${MISSING}");
     }
 
@@ -110,9 +110,6 @@ mod tests {
 
     #[test]
     fn test_load_env_file_basic() {
-        use std::io::Write;
-        use tempfile::NamedTempFile;
-
         let mut file = NamedTempFile::new().unwrap();
         writeln!(file, "TAG=v1.0").unwrap();
         writeln!(file, "USER=admin").unwrap();
@@ -124,9 +121,6 @@ mod tests {
 
     #[test]
     fn test_load_env_file_with_comments() {
-        use std::io::Write;
-        use tempfile::NamedTempFile;
-
         let mut file = NamedTempFile::new().unwrap();
         writeln!(file, "# This is a comment").unwrap();
         writeln!(file, "TAG=v1.0").unwrap();
@@ -142,9 +136,6 @@ mod tests {
 
     #[test]
     fn test_load_env_file_with_quotes() {
-        use std::io::Write;
-        use tempfile::NamedTempFile;
-
         let mut file = NamedTempFile::new().unwrap();
         writeln!(file, "DOUBLE=\"quoted value\"").unwrap();
         writeln!(file, "SINGLE='single quoted'").unwrap();
@@ -152,5 +143,30 @@ mod tests {
         let vars = load_env_file(file.path()).unwrap();
         assert_eq!(vars.get("DOUBLE"), Some(&"quoted value".to_string()));
         assert_eq!(vars.get("SINGLE"), Some(&"single quoted".to_string()));
+    }
+
+    #[test]
+    fn test_load_env_file_malformed() {
+        let mut file = NamedTempFile::new().unwrap();
+        writeln!(file, "VALID_KEY=value").unwrap();
+        writeln!(file, "INVALID_LINE_NO_EQUALS").unwrap();
+        writeln!(file, "=MISSING_KEY").unwrap();
+
+        let vars = load_env_file(file.path()).unwrap();
+        assert_eq!(vars.len(), 2);
+        assert_eq!(vars.get("VALID_KEY"), Some(&"value".to_string()));
+        assert_eq!(vars.get(""), Some(&"MISSING_KEY".to_string()));
+    }
+
+    #[test]
+    fn test_load_env_file_multiple_equals() {
+        let mut file = NamedTempFile::new().unwrap();
+        writeln!(file, "COMPLEX_VAL=key1=val1;key2=val2").unwrap();
+
+        let vars = load_env_file(file.path()).unwrap();
+        assert_eq!(
+            vars.get("COMPLEX_VAL"),
+            Some(&"key1=val1;key2=val2".to_string())
+        );
     }
 }

@@ -36,7 +36,6 @@ pub async fn pull_image_with_progress(docker: &Docker, image: &str) -> Result<()
         match result {
             Ok(info) => {
                 if let Some(status) = &info.status {
-                    // Print progress on same line
                     print!("\r  {} ", status);
                     if let Some(progress) = &info.progress_detail {
                         if let (Some(current), Some(total)) = (progress.current, progress.total) {
@@ -64,19 +63,22 @@ pub async fn pull_image_with_progress(docker: &Docker, image: &str) -> Result<()
 ///
 /// * `image` - The image reference string.
 pub fn parse_image_reference(image: &str) -> (&str, &str) {
-    // Handle digests (repo@sha256:...)
     if image.contains('@') {
         return (image, "");
     }
 
-    // Handle tags (repo:tag)
     match image.rsplit_once(':') {
-        Some((repo, tag)) if !repo.contains('/') || !tag.contains('/') => (repo, tag),
+        Some((repo, tag)) if !tag.contains('/') => (repo, tag),
         _ => (image, "latest"),
     }
 }
 
 /// Retrieves the digest for a local Docker image.
+///
+/// # Arguments
+///
+/// * `docker` - The Docker client.
+/// * `image` - The image reference to inspect.
 pub async fn get_image_digest(docker: &Docker, image: &str) -> Option<String> {
     match docker.inspect_image(image).await {
         Ok(info) => info.id,
@@ -114,5 +116,19 @@ mod tests {
         let (repo, tag) = parse_image_reference("localhost:5000/image:v1");
         assert_eq!(repo, "localhost:5000/image");
         assert_eq!(tag, "v1");
+    }
+
+    #[test]
+    fn test_parse_image_name_digest() {
+        let (repo, tag) = parse_image_reference("nginx@sha256:abc123def456");
+        assert_eq!(repo, "nginx@sha256:abc123def456");
+        assert_eq!(tag, "");
+    }
+
+    #[test]
+    fn test_parse_image_name_with_port_no_tag() {
+        let (repo, tag) = parse_image_reference("localhost:5000/image");
+        assert_eq!(repo, "localhost:5000/image");
+        assert_eq!(tag, "latest");
     }
 }

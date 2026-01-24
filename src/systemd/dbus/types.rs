@@ -97,3 +97,41 @@ impl JobId {
         Self(id)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_unit_state_from_dbus() {
+        assert_eq!(UnitState::from_dbus("active"), UnitState::Active);
+        assert_eq!(UnitState::from_dbus("activating"), UnitState::Activating);
+        assert_eq!(UnitState::from_dbus("unknown_state"), UnitState::Unknown);
+    }
+
+    #[test]
+    fn test_sub_state_from_dbus() {
+        assert_eq!(SubState::from_dbus("running"), SubState::Running);
+        assert_eq!(SubState::from_dbus("dead"), SubState::Dead);
+        assert_eq!(SubState::from_dbus("something_else"), SubState::Unknown);
+    }
+
+    #[test]
+    fn test_job_result_from_dbus() {
+        assert_eq!(JobResult::from_dbus("done"), JobResult::Done);
+        assert_eq!(JobResult::from_dbus("failed"), JobResult::Failed);
+        assert_eq!(JobResult::from_dbus("what"), JobResult::Unknown);
+    }
+
+    #[test]
+    fn test_job_id_from_path() {
+        use zbus::zvariant::ObjectPath;
+        let p = ObjectPath::try_from("/org/freedesktop/systemd1/job/123").unwrap();
+        let owned = OwnedObjectPath::from(p);
+        assert_eq!(JobId::from_path(&owned).0, 123);
+
+        let p_invalid = ObjectPath::try_from("/invalid/path").unwrap();
+        let owned_invalid = OwnedObjectPath::from(p_invalid);
+        assert_eq!(JobId::from_path(&owned_invalid).0, 0);
+    }
+}

@@ -138,3 +138,35 @@ fn format_port(p: &PortInfo) -> String {
         _ => format!("{}/{}", private, port_type),
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_format_port() {
+        let p1 = PortInfo {
+            ip: Some("0.0.0.0".to_string()),
+            private_port: 80,
+            public_port: Some(8080),
+            type_: Some("tcp".to_string()),
+        };
+        assert_eq!(format_port(&p1), "0.0.0.0:8080->80/tcp");
+
+        let p2 = PortInfo {
+            ip: None,
+            private_port: 80,
+            public_port: Some(8080),
+            type_: Some("udp".to_string()),
+        };
+        assert_eq!(format_port(&p2), "8080->80/udp");
+
+        let p3 = PortInfo {
+            ip: None,
+            private_port: 80,
+            public_port: None,
+            type_: None,
+        };
+        assert_eq!(format_port(&p3), "80/tcp");
+    }
+}

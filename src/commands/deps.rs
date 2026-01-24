@@ -181,7 +181,7 @@ async fn remove_deps(ctx: &Context, service: &str, deps_to_remove: &[String]) ->
     let override_file = get_override_file(ctx, service);
     if !override_file.exists() {
         println!("No dependencies to remove");
-        return Ok(())
+        return Ok(());
     }
 
     let mut current_deps = parse_override_file(&override_file)?;
