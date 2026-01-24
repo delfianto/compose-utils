@@ -1,3 +1,8 @@
+//! Docker interaction module.
+//!
+//! Provides high-level abstractions for communicating with the Docker daemon,
+//! managing containers, and handling images.
+
 pub mod containers;
 pub mod images;
 pub mod types;
@@ -6,7 +11,21 @@ use crate::core::Context;
 use anyhow::{Context as _, Result, bail};
 use bollard::Docker;
 
-/// Connect to Docker using the configured DOCKER_HOST from compose.env
+/// Establishes a connection to the Docker daemon based on the provided [`Context`].
+///
+/// If `ctx.docker_host` is configured, it will attempt to connect using the specified URI
+/// (supporting `unix://` and `tcp://` schemes). Otherwise, it defaults to the standard
+/// socket connection.
+///
+/// # Arguments
+///
+/// * `ctx` - The application context containing Docker host configuration.
+///
+/// # Errors
+///
+/// Returns an error if:
+/// - The `DOCKER_HOST` format is unsupported.
+/// - The connection to the Docker API fails.
 pub fn connect_docker(ctx: &Context) -> Result<Docker> {
     match &ctx.docker_host {
         Some(host) => {

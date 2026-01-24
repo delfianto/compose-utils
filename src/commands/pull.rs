@@ -1,8 +1,22 @@
+//! Logic for the `pull` command.
+
 use crate::core::Context;
 use anyhow::Result;
 use colored::*;
 
-/// Pull images for services without restarting
+/// Executes the `pull` command to download Docker images for specified services.
+///
+/// This command pulls the latest versions of images defined in the compose files
+/// without restarting the associated systemd services.
+///
+/// # Arguments
+///
+/// * `ctx` - The application context.
+/// * `services` - A list of service names to pull images for.
+///
+/// # Errors
+///
+/// Returns an error if service resolution, validation, or image pulling fails.
 pub async fn run_pull(ctx: &Context, services: &[String]) -> Result<()> {
     let docker = crate::docker::connect_docker(ctx)?;
 

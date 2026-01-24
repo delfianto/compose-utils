@@ -1,7 +1,26 @@
+//! High-level command implementations for managing systemd services.
+
 use crate::core::Context;
 use anyhow::{Context as _, Result};
 use std::process::Command;
 
+/// Orchestrates service-related `systemctl` actions with discovery and validation.
+///
+/// This is a generic wrapper that handles:
+/// 1. Automatic service detection if no services are specified.
+/// 2. Validation of compose project directories.
+/// 3. Execution of the `systemctl` command via [`crate::systemd::service::run_systemctl`].
+///
+/// # Arguments
+///
+/// * `ctx` - The application context.
+/// * `action` - The systemctl action (e.g., "start", "stop", "status").
+/// * `services` - Explicit list of services.
+/// * `validate` - Whether to verify directory existence before running.
+///
+/// # Errors
+///
+/// Returns an error if resolution or execution fails.
 pub fn run_systemctl(
     ctx: &Context,
     action: &str,
@@ -30,18 +49,41 @@ pub fn run_systemctl(
     crate::systemd::service::run_systemctl(ctx, action, &services)
 }
 
+/// Executes the `start` (or `up`) command.
+///
+/// # Arguments
+///
+/// * `ctx` - The application context.
+/// * `services` - Services to start.
 pub fn run_start(ctx: &Context, services: &[String]) -> Result<()> {
     run_systemctl(ctx, "start", services, true)
 }
 
+/// Executes the `stop` (or `down`) command.
+///
+/// # Arguments
+///
+/// * `ctx` - The application context.
+/// * `services` - Services to stop.
 pub fn run_stop(ctx: &Context, services: &[String]) -> Result<()> {
     run_systemctl(ctx, "stop", services, true)
 }
 
+/// Executes the `restart` (or `reup`) command.
+///
+/// # Arguments
+///
+/// * `ctx` - The application context.
+/// * `services` - Services to restart.
 pub fn run_restart(ctx: &Context, services: &[String]) -> Result<()> {
     run_systemctl(ctx, "restart", services, true)
 }
 
+/// Executes the `list` (or `ls`) command to show all `compose@` units.
+///
+/// # Arguments
+///
+/// * `ctx` - The application context.
 pub fn run_list(ctx: &Context) -> Result<()> {
     let mut cmd = Command::new(&ctx.systemctl_cmd[0]);
     if ctx.systemctl_cmd.len() > 1 {
@@ -53,6 +95,20 @@ pub fn run_list(ctx: &Context) -> Result<()> {
     Ok(())
 }
 
+/// Executes the `logs` command using `journalctl`.
+///
+/// Automatically determines whether to use `--user` mode.
+///
+/// # Arguments
+///
+/// * `ctx` - The application context.
+/// * `service` - The service name.
+/// * `follow` - Whether to tail the logs (`-f`).
+/// * `lines` - Number of tail lines to show (`-n`).
+///
+/// # Errors
+///
+/// Returns an error if `journalctl` fails.
 pub fn run_logs(ctx: &Context, service: &str, follow: bool, lines: Option<usize>) -> Result<()> {
     let service = crate::systemd::discovery::resolve_service(ctx, service)?;
 
@@ -79,16 +135,22 @@ pub fn run_logs(ctx: &Context, service: &str, follow: bool, lines: Option<usize>
     Ok(())
 }
 
+/// Executes the `enable` command.
+///
+/// Also ensures that symlinks for nested directories are created.
+///
+/// # Arguments
+///
+/// * `ctx` - The application context.
+/// * `services` - Services to enable.
 pub fn run_enable(ctx: &Context, services: &[String]) -> Result<()> {
     let services = crate::systemd::discovery::resolve_services(ctx, services)?;
     crate::systemd::discovery::validate_compose_dirs(ctx, &services)?;
 
-    // Create symlinks for nested directories
     for service in &services {
         crate::systemd::manager::ensure_symlink(ctx, service)?;
     }
 
-    // Run systemctl enable
     let mut cmd = Command::new(&ctx.systemctl_cmd[0]);
     if ctx.systemctl_cmd.len() > 1 {
         cmd.args(&ctx.systemctl_cmd[1..]);
@@ -109,10 +171,17 @@ pub fn run_enable(ctx: &Context, services: &[String]) -> Result<()> {
     Ok(())
 }
 
+/// Executes the `disable` command.
+///
+/// Also removes associated symlinks for nested directories.
+///
+/// # Arguments
+///
+/// * `ctx` - The application context.
+/// * `services` - Services to disable.
 pub fn run_disable(ctx: &Context, services: &[String]) -> Result<()> {
     let services = crate::systemd::discovery::resolve_services(ctx, services)?;
 
-    // Run systemctl disable first
     let mut cmd = Command::new(&ctx.systemctl_cmd[0]);
     if ctx.systemctl_cmd.len() > 1 {
         cmd.args(&ctx.systemctl_cmd[1..]);
@@ -127,7 +196,6 @@ pub fn run_disable(ctx: &Context, services: &[String]) -> Result<()> {
     println!("Running: {:?}", cmd);
     let status = cmd.status().context("Failed to execute systemctl")?;
 
-    // Remove symlinks
     for service in &services {
         crate::systemd::manager::remove_symlink(ctx, service)?;
     }

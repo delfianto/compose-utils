@@ -1,3 +1,5 @@
+//! Logic for managing dependencies between systemd services using drop-in overrides.
+
 use crate::core::Context;
 use anyhow::{Context as _, Result};
 use clap::Args;
@@ -6,36 +8,47 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
+/// Command-line arguments for the `deps` subcommand.
 #[derive(Args)]
 pub struct DepsArgs {
+    /// The name of the service to manage dependencies for.
     #[arg(help = "Service name")]
-    service: String,
+    pub service: String,
 
+    /// Add one or more services as dependencies.
     #[arg(long, help = "Add dependencies")]
-    add: Option<Vec<String>>,
+    pub add: Option<Vec<String>>,
 
+    /// Remove one or more services from dependencies.
     #[arg(long, help = "Remove dependencies")]
-    remove: Option<Vec<String>>,
+    pub remove: Option<Vec<String>>,
 
+    /// List currently configured dependencies for the service.
     #[arg(long, help = "List dependencies")]
-    list: bool,
+    pub list: bool,
 
+    /// Use `Requires` instead of `Wants` when adding dependencies.
     #[arg(long, help = "Use Requires instead of Wants")]
-    requires: bool,
+    pub requires: bool,
 }
 
+/// Entry point for the `deps` command.
+///
+/// # Arguments
+///
+/// * `ctx` - The application context.
+/// * `args` - The parsed command arguments.
 pub fn run(ctx: &Context, args: DepsArgs) -> Result<()> {
-    // Determine action
     if let Some(deps) = &args.add {
         add_deps(ctx, &args.service, deps, args.requires)
     } else if let Some(deps) = &args.remove {
         remove_deps(ctx, &args.service, deps)
     } else {
-        // Default to list if list flag is set or no other action
         list_deps(ctx, &args.service)
     }
 }
 
+/// Normalizes a project name into a full systemd service name (e.g., `compose@myapp.service`).
 fn get_compose_service_name(project: &str) -> String {
     let project = if let Some(stripped) = project.strip_suffix(".service") {
         if project.starts_with("compose@") {
@@ -55,18 +68,21 @@ fn get_compose_service_name(project: &str) -> String {
     }
 }
 
+/// Returns the path to the systemd drop-in override directory for a service.
 fn get_override_dir(ctx: &Context, service: &str) -> PathBuf {
     let service_name = get_compose_service_name(service);
     ctx.systemd_dir.join(format!("{}.d", service_name))
 }
 
+/// Returns the path to the dependency configuration file within the override directory.
 fn get_override_file(ctx: &Context, service: &str) -> PathBuf {
     get_override_dir(ctx, service).join("dependencies.conf")
 }
 
-// Map key -> list of values
+/// Internal type for storing parsed systemd unit dependencies.
 type SystemdDeps = HashMap<String, Vec<String>>;
 
+/// Parses a systemd drop-in override file to extract dependency keys.
 fn parse_override_file(override_file: &Path) -> Result<SystemdDeps> {
     let mut deps: SystemdDeps = HashMap::new();
     deps.insert("Requires".to_string(), Vec::new());
@@ -105,6 +121,7 @@ fn parse_override_file(override_file: &Path) -> Result<SystemdDeps> {
     Ok(deps)
 }
 
+/// Writes dependency configuration to a systemd drop-in override file.
 fn write_override_file(override_file: &Path, deps: &SystemdDeps) -> Result<()> {
     let mut lines = Vec::new();
     lines.push("[Unit]".to_string());
@@ -121,6 +138,7 @@ fn write_override_file(override_file: &Path, deps: &SystemdDeps) -> Result<()> {
     Ok(())
 }
 
+/// Logic for the `add` action.
 fn add_deps(ctx: &Context, service: &str, deps_to_add: &[String], requires: bool) -> Result<()> {
     let override_dir = get_override_dir(ctx, service);
     let override_file = get_override_file(ctx, service);
@@ -133,13 +151,11 @@ fn add_deps(ctx: &Context, service: &str, deps_to_add: &[String], requires: bool
     for dep in deps_to_add {
         let dep_name = get_compose_service_name(dep);
 
-        // Add to type
         let list = current_deps.entry(dep_type.to_string()).or_default();
         if !list.contains(&dep_name) {
             list.push(dep_name.clone());
         }
 
-        // Always add After
         let after_list = current_deps.entry("After".to_string()).or_default();
         if !after_list.contains(&dep_name) {
             after_list.push(dep_name);
@@ -149,7 +165,6 @@ fn add_deps(ctx: &Context, service: &str, deps_to_add: &[String], requires: bool
     write_override_file(&override_file, &current_deps)?;
     println!("Added dependencies to {}", service);
 
-    // Daemon reload
     let mut cmd = Command::new(&ctx.systemctl_cmd[0]);
     if ctx.systemctl_cmd.len() > 1 {
         cmd.args(&ctx.systemctl_cmd[1..]);
@@ -160,6 +175,7 @@ fn add_deps(ctx: &Context, service: &str, deps_to_add: &[String], requires: bool
     Ok(())
 }
 
+/// Logic for the `remove` action.
 fn remove_deps(ctx: &Context, service: &str, deps_to_remove: &[String]) -> Result<()> {
     let override_file = get_override_file(ctx, service);
     if !override_file.exists() {
@@ -173,10 +189,10 @@ fn remove_deps(ctx: &Context, service: &str, deps_to_remove: &[String]) -> Resul
         let dep_name = get_compose_service_name(dep);
 
         for key in ["Requires", "Wants", "After"] {
-            if let Some(list) = current_deps.get_mut(key)
-                && let Some(pos) = list.iter().position(|x| x == &dep_name)
-            {
-                list.remove(pos);
+            if let Some(list) = current_deps.get_mut(key) {
+                if let Some(pos) = list.iter().position(|x| x == &dep_name) {
+                    list.remove(pos);
+                }
             }
         }
     }
@@ -194,6 +210,7 @@ fn remove_deps(ctx: &Context, service: &str, deps_to_remove: &[String]) -> Resul
     Ok(())
 }
 
+/// Logic for the `list` action.
 fn list_deps(ctx: &Context, service: &str) -> Result<()> {
     let override_file = get_override_file(ctx, service);
     if !override_file.exists() {
@@ -202,13 +219,71 @@ fn list_deps(ctx: &Context, service: &str) -> Result<()> {
     }
 
     let deps = parse_override_file(&override_file)?;
-    for (k, v) in deps {
-        if !v.is_empty() {
-            println!("{}:", k);
-            for item in v {
-                println!("  - {}", item);
+    for key in ["Requires", "Wants", "After"] {
+        if let Some(v) = deps.get(key) {
+            if !v.is_empty() {
+                println!("{}:", key);
+                for item in v {
+                    println!("  - {}", item);
+                }
             }
         }
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tempfile::tempdir;
+
+    #[test]
+    fn test_get_compose_service_name() {
+        assert_eq!(get_compose_service_name("myapp"), "compose@myapp.service");
+        assert_eq!(
+            get_compose_service_name("compose@myapp"),
+            "compose@myapp.service"
+        );
+        assert_eq!(
+            get_compose_service_name("compose@myapp.service"),
+            "compose@myapp.service"
+        );
+        assert_eq!(
+            get_compose_service_name("myapp.service"),
+            "compose@myapp.service"
+        );
+    }
+
+    #[test]
+    fn test_parse_override_file_empty() {
+        let dir = tempdir().unwrap();
+        let file = dir.path().join("test.conf");
+        let deps = parse_override_file(&file).unwrap();
+        assert!(deps.get("Wants").unwrap().is_empty());
+    }
+
+    #[test]
+    fn test_parse_override_file_valid() {
+        let dir = tempdir().unwrap();
+        let file = dir.path().join("test.conf");
+        let content = "[Unit]\nWants=compose@db.service\nAfter=compose@db.service\n";
+        fs::write(&file, content).unwrap();
+
+        let deps = parse_override_file(&file).unwrap();
+        assert_eq!(deps.get("Wants").unwrap(), &vec!["compose@db.service"]);
+        assert_eq!(deps.get("After").unwrap(), &vec!["compose@db.service"]);
+    }
+
+    #[test]
+    fn test_write_override_file() {
+        let dir = tempdir().unwrap();
+        let file = dir.path().join("test.conf");
+        let mut deps: SystemdDeps = HashMap::new();
+        deps.insert("Wants".to_string(), vec!["compose@db.service".to_string()]);
+
+        write_override_file(&file, &deps).unwrap();
+        let content = fs::read_to_string(&file).unwrap();
+        assert!(content.contains("[Unit]"));
+        assert!(content.contains("Wants=compose@db.service"));
+    }
 }

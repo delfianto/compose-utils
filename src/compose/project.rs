@@ -1,3 +1,5 @@
+//! Logic for discovering Docker Compose projects and extracting information from them.
+
 use super::env::{load_env_file, resolve_env_vars};
 use super::types::DockerCompose;
 use crate::constants::COMPOSE_FILES;
@@ -6,7 +8,15 @@ use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 
-/// Find compose file in a directory
+/// Searches for a valid Docker Compose file in the specified directory.
+///
+/// Iterates through [`COMPOSE_FILES`] and returns the path to the first one found.
+///
+/// # Arguments
+///
+/// * `dir` - The directory to search in.
+///
+/// Returns [`Some(PathBuf)`] if a file is found, otherwise [`None`].
 pub fn find_compose_file(dir: &Path) -> Option<PathBuf> {
     for name in COMPOSE_FILES {
         let path = dir.join(name);
@@ -17,20 +27,35 @@ pub fn find_compose_file(dir: &Path) -> Option<PathBuf> {
     None
 }
 
-/// Get images from a compose project directory
+/// Extracts a list of all image names defined in a Docker Compose project.
+///
+/// This function:
+/// 1. Locates the compose file.
+/// 2. Loads a `.env` file if present in the same directory.
+/// 3. Parses the YAML content.
+/// 4. Resolves any environment variable placeholders in image names.
+///
+/// # Arguments
+///
+/// * `project_dir` - The base directory of the compose project.
+///
+/// # Errors
+///
+/// Returns an error if:
+/// - No compose file is found.
+/// - The compose file or `.env` file cannot be read.
+/// - The YAML content is malformed.
 pub fn get_images_for_project(project_dir: &Path) -> Result<Vec<String>> {
     let compose_file = find_compose_file(project_dir)
         .ok_or_else(|| anyhow::anyhow!("No compose file found in {:?}", project_dir))?;
     let env_file = project_dir.join(".env");
 
-    // Load .env if present
     let env_vars = if env_file.exists() {
         load_env_file(&env_file)?
     } else {
         HashMap::new()
     };
 
-    // Parse compose file
     let content = fs::read_to_string(&compose_file)
         .with_context(|| format!("Failed to read {:?}", compose_file))?;
 

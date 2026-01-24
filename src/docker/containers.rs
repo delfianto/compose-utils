@@ -1,8 +1,22 @@
+//! Logic for retrieving and processing Docker container information.
+
 use super::types::{ContainerInfo, PortInfo};
 use anyhow::{Context, Result};
 use bollard::Docker;
 use bollard::query_parameters::ListContainersOptions;
 
+/// Retrieves a list of all Docker containers and transforms them into domain types.
+///
+/// This function queries the Docker API for all containers (including stopped ones)
+/// and maps the result into a vector of [`ContainerInfo`].
+///
+/// # Arguments
+///
+/// * `docker` - A reference to the initialized [`Docker`] client.
+///
+/// # Errors
+///
+/// Returns an error if the Docker API call fails.
 pub async fn list_containers(docker: &Docker) -> Result<Vec<ContainerInfo>> {
     let options = ListContainersOptions {
         all: true,

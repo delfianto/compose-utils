@@ -1,10 +1,24 @@
+//! Utilities for handling environment variables and `.env` files.
+
 use anyhow::Result;
 use regex::Regex;
 use std::collections::HashMap;
 use std::fs;
 use std::path::Path;
 
-/// Load environment variables from a .env file
+/// Loads environment variables from a specified `.env` file.
+///
+/// - Ignores empty lines and comments (starting with `#`).
+/// - Trims whitespace from keys and values.
+/// - Strips surrounding quotes (double or single) from values.
+///
+/// # Arguments
+///
+/// * `path` - The path to the `.env` file to read.
+///
+/// # Errors
+///
+/// Returns an error if the file cannot be read.
 pub fn load_env_file(path: &Path) -> Result<HashMap<String, String>> {
     let content = fs::read_to_string(path)?;
     let mut vars = HashMap::new();
@@ -23,7 +37,15 @@ pub fn load_env_file(path: &Path) -> Result<HashMap<String, String>> {
     Ok(vars)
 }
 
-/// Resolve environment variables in a string (e.g., ${TAG} or $TAG)
+/// Resolves environment variable placeholders in a string.
+///
+/// Placeholders can be in the form `${VAR}` or `$VAR`. If a variable is not
+/// found in the provided map, the placeholder is left as-is.
+///
+/// # Arguments
+///
+/// * `text` - The string containing potential placeholders.
+/// * `vars` - A map containing variable keys and their replacement values.
 pub fn resolve_env_vars(text: &str, vars: &HashMap<String, String>) -> String {
     let re = Regex::new(r"\$\{?([a-zA-Z_][a-zA-Z0-9_]*)\}?").unwrap();
     re.replace_all(text, |caps: &regex::Captures| {

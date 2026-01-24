@@ -1,14 +1,21 @@
+//! Logic for discovering and resolving systemd services based on the filesystem.
+
 use super::service::{get_bare_name, get_compose_dir};
 use crate::constants::COMPOSE_FILES;
 use crate::core::Context;
 use anyhow::{Result, bail};
 use std::env;
 use std::fs;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
-/// Detect service name from current directory.
-/// Returns Some(service_name) if current directory is under compose_base
-/// and contains a compose file.
+/// Attempts to detect a service name based on the current working directory.
+///
+/// Returns a service name if the CWD is within the `compose_base` and contains
+/// a recognized Docker Compose file.
+///
+/// # Arguments
+///
+/// * `ctx` - The application context.
 pub fn detect_service_from_cwd(ctx: &Context) -> Option<String> {
     let cwd = env::current_dir().ok()?;
     let rel_path = cwd.strip_prefix(&ctx.compose_base).ok()?;
@@ -25,7 +32,16 @@ pub fn detect_service_from_cwd(ctx: &Context) -> Option<String> {
     Some(service_name)
 }
 
-/// Resolve services list. If empty, try to detect from current directory.
+/// Resolves a list of service names, defaulting to CWD detection if the list is empty.
+///
+/// # Arguments
+///
+/// * `ctx` - The application context.
+/// * `services` - An optional list of explicit service names.
+///
+/// # Errors
+///
+/// Returns an error if no services are specified and detection fails.
 pub fn resolve_services(ctx: &Context, services: &[String]) -> Result<Vec<String>> {
     if !services.is_empty() {
         return Ok(services.to_vec());
@@ -37,13 +53,21 @@ pub fn resolve_services(ctx: &Context, services: &[String]) -> Result<Vec<String
     }
 
     bail!(
-        "No service specified and current directory is not a compose project.\n\\
-        Either specify a service name or run from a directory under {}",
+        "No service specified and current directory is not a compose project.\n\nEither specify a service name or run from a directory under {}",
         ctx.compose_base.display()
     );
 }
 
-/// Resolve a single service. If empty, try to detect from current directory.
+/// Resolves a single service name, defaulting to CWD detection if the name is empty.
+///
+/// # Arguments
+///
+/// * `ctx` - The application context.
+/// * `service` - An explicit service name.
+///
+/// # Errors
+///
+/// Returns an error if no service is specified and detection fails.
 pub fn resolve_service(ctx: &Context, service: &str) -> Result<String> {
     if !service.is_empty() {
         return Ok(service.to_string());
@@ -55,13 +79,21 @@ pub fn resolve_service(ctx: &Context, service: &str) -> Result<String> {
     }
 
     bail!(
-        "No service specified and current directory is not a compose project.\n\\
-        Either specify a service name or run from a directory under {}",
+        "No service specified and current directory is not a compose project.\n\nEither specify a service name or run from a directory under {}",
         ctx.compose_base.display()
     );
 }
 
-/// Validate that compose directories exist for all given services.
+/// Validates that all provided services have existing compose directories.
+///
+/// # Arguments
+///
+/// * `ctx` - The application context.
+/// * `services` - A list of service names to validate.
+///
+/// # Errors
+///
+/// Returns an error if any of the service directories do not exist.
 pub fn validate_compose_dirs(ctx: &Context, services: &[String]) -> Result<()> {
     let mut missing = Vec::new();
 
@@ -78,9 +110,9 @@ pub fn validate_compose_dirs(ctx: &Context, services: &[String]) -> Result<()> {
             .iter()
             .map(|(name, path)| format!("  - '{}' (expected at {})", name, path.display()))
             .collect::<Vec<_>>()
-            .join("\n"); // This is a valid escape sequence for a newline in Rust string literals.
+            .join("\n");
         bail!(
-            "Compose directory not found for the following services:\n{}\\n\nEnsure the service name matches an existing directory under {}",
+            "Compose directory not found for the following services:\n{}\n\nEnsure the service name matches an existing directory under {}",
             msg,
             ctx.compose_base.display()
         );
@@ -89,14 +121,25 @@ pub fn validate_compose_dirs(ctx: &Context, services: &[String]) -> Result<()> {
     Ok(())
 }
 
-/// Get all managed services by scanning COMPOSE_BASE.
+/// Scans the `compose_base` directory to find all managed services.
+///
+/// A service is identified by a directory containing a valid Docker Compose file.
+///
+/// # Arguments
+///
+/// * `ctx` - The application context.
+///
+/// # Errors
+///
+/// Returns an error if scanning fails.
 pub fn find_all_services(ctx: &Context) -> Result<Vec<String>> {
     let mut services = Vec::new();
     if !ctx.compose_base.exists() {
         return Ok(services);
     }
 
-    fn scan_dir(base: &std::path::Path, current: PathBuf, services: &mut Vec<String>) {
+    /// Recursively scans a directory for compose projects.
+    fn scan_dir(base: &Path, current: PathBuf, services: &mut Vec<String>) {
         let entries = match fs::read_dir(&current) {
             Ok(e) => e,
             Err(_) => return,
@@ -125,7 +168,6 @@ pub fn find_all_services(ctx: &Context) -> Result<Vec<String>> {
             services.push(s.replace([std::path::MAIN_SEPARATOR, '/'], "-"));
         }
 
-        // Continue searching subdirectories regardless of whether this dir is a project
         for subdir in subdirs {
             scan_dir(base, subdir, services);
         }
@@ -161,7 +203,9 @@ mod tests {
     impl TestDir {
         fn new(name: &str) -> Self {
             let base = PathBuf::from(format!("/tmp/compose-test-{}-{}", name, std::process::id()));
+
             fs::create_dir_all(&base).unwrap();
+
             Self { base }
         }
 
@@ -245,7 +289,6 @@ mod tests {
 
     #[test]
     fn test_detect_service_not_under_compose_base() {
-        // cwd is not under compose_base, should return None
         let test_dir = TestDir::new("detect-not-under");
         let ctx = test_context(test_dir.path());
         let result = detect_service_from_cwd(&ctx);
@@ -272,7 +315,6 @@ mod tests {
     #[test]
     fn test_roundtrip_simple_name() {
         use super::super::service::name_to_service;
-        // myapp -> compose@myapp.service, directory myapp
         let test_dir = TestDir::new("roundtrip-simple");
         test_dir.create_dir("myapp");
         let ctx = test_context(test_dir.path());
@@ -290,7 +332,6 @@ mod tests {
     #[test]
     fn test_roundtrip_nested_name() {
         use super::super::service::name_to_service;
-        // genai/ollama -> compose@genai-ollama.service, directory genai/ollama
         let test_dir = TestDir::new("roundtrip-nested");
         test_dir.create_dir("genai/ollama");
         let ctx = test_context(test_dir.path());
@@ -308,7 +349,6 @@ mod tests {
     #[test]
     fn test_roundtrip_dash_input_to_nested() {
         use super::super::service::name_to_service;
-        // genai-ollama -> compose@genai-ollama.service, directory genai/ollama
         let test_dir = TestDir::new("roundtrip-dash");
         test_dir.create_dir("genai/ollama");
         let ctx = test_context(test_dir.path());
@@ -326,7 +366,6 @@ mod tests {
     #[test]
     fn test_roundtrip_flat_with_dash() {
         use super::super::service::name_to_service;
-        // my-project (flat dir) -> compose@my-project.service, directory my-project
         let test_dir = TestDir::new("roundtrip-flat-dash");
         test_dir.create_dir("my-project");
         let ctx = test_context(test_dir.path());

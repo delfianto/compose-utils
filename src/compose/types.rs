@@ -1,14 +1,22 @@
+//! Data types representing Docker Compose file structures.
+
 use serde::Deserialize;
 use std::collections::HashMap;
 
-/// Struct representing a subset of docker-compose.yml structure for image parsing
+/// Represents a subset of a `docker-compose.yml` file.
+///
+/// This structure is used primarily for extracting image information from
+/// defined services.
 #[derive(Deserialize, Debug)]
 pub struct DockerCompose {
+    /// A map of service names to their respective configurations.
     pub services: Option<HashMap<String, ComposeService>>,
 }
 
+/// Represents the configuration of an individual service in a Docker Compose file.
 #[derive(Deserialize, Debug)]
 pub struct ComposeService {
+    /// The Docker image name assigned to this service.
     pub image: Option<String>,
 }
 

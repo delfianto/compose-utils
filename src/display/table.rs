@@ -1,14 +1,23 @@
+//! Logic for rendering Docker container information in a tabular format.
+
 use crate::display::status::{parse_status_uptime_health, state_to_emoji};
-use crate::docker::types::ContainerInfo;
+use crate::docker::types::{ContainerInfo, PortInfo};
 use chrono::{DateTime, Utc};
 
+/// Renders a list of Docker containers into a formatted table printed to stdout.
+///
+/// The table includes columns for ID, name, image, creation date, uptime,
+/// port mappings, state, and health.
+///
+/// # Arguments
+///
+/// * `containers` - A vector of [`ContainerInfo`] objects to display.
 pub fn render_containers_table(containers: Vec<ContainerInfo>) {
     if containers.is_empty() {
         println!("No containers found.");
         return;
     }
 
-    // Headers: emojis at the end to avoid padding issues
     let headers = [
         "ID",
         "NAME",
@@ -20,7 +29,7 @@ pub fn render_containers_table(containers: Vec<ContainerInfo>) {
         "HEALTH",
     ];
 
-    // Pre-process data
+    /// Internal structure representing a processed row of data.
     struct RowData {
         id: String,
         name: String,
@@ -33,7 +42,6 @@ pub fn render_containers_table(containers: Vec<ContainerInfo>) {
     }
     let mut data: Vec<RowData> = Vec::new();
 
-    // Track max widths for non-emoji columns
     let mut w_id = headers[0].len();
     let mut w_name = headers[1].len();
     let mut w_image = headers[2].len();
@@ -43,10 +51,8 @@ pub fn render_containers_table(containers: Vec<ContainerInfo>) {
 
     for c in containers {
         let id = &c.id;
-        // Take first 12 chars of container ID for display
         let id_short = if id.len() > 12 { &id[..12] } else { id };
 
-        // Names in Docker API come as "/container-name", strip the leading slash
         let name = c
             .names
             .first()
@@ -55,7 +61,6 @@ pub fn render_containers_table(containers: Vec<ContainerInfo>) {
 
         let image = c.image.as_deref().unwrap_or("<unknown>");
 
-        // Convert Unix timestamp to readable format
         let created = c
             .created
             .map(|ts: i64| {
@@ -71,24 +76,8 @@ pub fn render_containers_table(containers: Vec<ContainerInfo>) {
         let state_str = c.state.as_deref().unwrap_or("unknown").to_lowercase();
         let state = state_to_emoji(&state_str).to_string();
 
-        // Format ports from domain structure
-        let ports: Vec<String> = c
-            .ports
-            .iter()
-            .map(|p| {
-                let private = p.private_port;
-                let port_type = p.type_.as_deref().unwrap_or("tcp");
-                match (&p.ip, p.public_port) {
-                    (Some(ip), Some(public)) => {
-                        format!("{}:{}->{}/{}", ip, public, private, port_type)
-                    }
-                    (None, Some(public)) => format!("{}->{}/{}", public, private, port_type),
-                    _ => format!("{}/{}", private, port_type),
-                }
-            })
-            .collect();
+        let ports: Vec<String> = c.ports.iter().map(format_port).collect();
 
-        // Update widths
         w_id = w_id.max(id_short.len());
         w_name = w_name.max(name.len());
         w_image = w_image.max(image.len());
@@ -110,17 +99,14 @@ pub fn render_containers_table(containers: Vec<ContainerInfo>) {
         });
     }
 
-    // Print header
     print!(
         "{:<w_id$}  {:<w_name$}  {:<w_image$}  {:<w_created$}  {:<w_uptime$}  {:<w_ports$}  STATE  HEALTH",
         headers[0], headers[1], headers[2], headers[3], headers[4], headers[5]
     );
     println!();
 
-    // Calculate indent for port continuation lines
     let port_indent = w_id + 2 + w_name + 2 + w_image + 2 + w_created + 2 + w_uptime + 2;
 
-    // Print rows
     for row in data {
         let first_port = row.ports.first().map(|s| s.as_str()).unwrap_or("");
 
@@ -130,9 +116,25 @@ pub fn render_containers_table(containers: Vec<ContainerInfo>) {
         );
         println!();
 
-        // Print remaining ports on continuation lines
         for port in row.ports.iter().skip(1) {
             println!("{:port_indent$}{}", "", port);
         }
+    }
+}
+
+/// Formats a [`PortInfo`] object into a human-readable string.
+///
+/// # Examples
+/// - `PortInfo { ip: Some("0.0.0.0"), private_port: 80, public_port: Some(8080), type_: Some("tcp") }`
+///   -> `"0.0.0.0:8080->80/tcp"`
+fn format_port(p: &PortInfo) -> String {
+    let private = p.private_port;
+    let port_type = p.type_.as_deref().unwrap_or("tcp");
+    match (&p.ip, p.public_port) {
+        (Some(ip), Some(public)) => {
+            format!("{}:{}->{}/{}", ip, public, private, port_type)
+        }
+        (None, Some(public)) => format!("{}->{}/{}", public, private, port_type),
+        _ => format!("{}/{}", private, port_type),
     }
 }

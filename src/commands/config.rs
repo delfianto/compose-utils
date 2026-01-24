@@ -1,3 +1,5 @@
+//! Logic for viewing and updating the tool's configuration (`compose.env`).
+
 use crate::constants::CONFIG_KEYS;
 use crate::core::{Context, read_env_file};
 use anyhow::{Context as _, Result, bail};
@@ -9,27 +11,43 @@ use std::net::ToSocketAddrs;
 use std::path::Path;
 use url::Url;
 
+/// Command-line arguments for the `config` subcommand.
 #[derive(Args)]
 pub struct ConfigArgs {
+    /// Set the COMPOSE_DATA directory path.
     #[arg(long, help = "Set COMPOSE_DATA directory path")]
-    compose_data: Option<String>,
+    pub compose_data: Option<String>,
 
+    /// Set the COMPOSE_BASE directory path.
     #[arg(long, help = "Set COMPOSE_BASE directory path")]
-    compose_base: Option<String>,
+    pub compose_base: Option<String>,
 
+    /// Set the ACME domain for Traefik.
     #[arg(long, help = "Set ACME domain for Traefik")]
-    acme_domain: Option<String>,
+    pub acme_domain: Option<String>,
 
+    /// Set the ACME email for Traefik.
     #[arg(long, help = "Set ACME email for Traefik")]
-    acme_email: Option<String>,
+    pub acme_email: Option<String>,
 
+    /// Set the ACME server URL for Traefik.
     #[arg(long, help = "Set ACME server URL for Traefik")]
-    acme_server: Option<String>,
+    pub acme_server: Option<String>,
 
+    /// Set the DOCKER_HOST URI.
     #[arg(long, help = "Set DOCKER_HOST")]
-    docker_host: Option<String>,
+    pub docker_host: Option<String>,
 }
 
+/// Entry point for the `config` command.
+///
+/// If any update arguments are provided, it performs an update.
+/// Otherwise, it displays the current configuration.
+///
+/// # Arguments
+///
+/// * `ctx` - The application context.
+/// * `args` - The parsed command arguments.
 pub fn run(ctx: &Context, args: ConfigArgs) -> Result<()> {
     if args.has_updates() {
         update_config(ctx, args)
@@ -39,6 +57,7 @@ pub fn run(ctx: &Context, args: ConfigArgs) -> Result<()> {
 }
 
 impl ConfigArgs {
+    /// Checks if any configuration update flags were provided.
     fn has_updates(&self) -> bool {
         self.compose_data.is_some()
             || self.compose_base.is_some()
@@ -49,12 +68,19 @@ impl ConfigArgs {
     }
 }
 
-/// Read the compose.env file and return a map of key-value pairs.
+/// Reads the `compose.env` file and returns it as a key-value map.
 fn read_config(ctx: &Context) -> Result<HashMap<String, String>> {
     read_env_file(&ctx.env_file)
 }
 
-/// Write the config back to the compose.env file.
+/// Writes the provided configuration map back to the `compose.env` file.
+///
+/// Preserves keys not specifically managed by this tool.
+///
+/// # Arguments
+///
+/// * `ctx` - The application context.
+/// * `config` - The map of configuration keys and values.
 fn write_config(ctx: &Context, config: &HashMap<String, String>) -> Result<()> {
     let mut lines = Vec::new();
     lines.push("# Compose Environment Configuration".to_string());
@@ -66,7 +92,6 @@ fn write_config(ctx: &Context, config: &HashMap<String, String>) -> Result<()> {
         }
     }
 
-    // Preserve any extra keys not in CONFIG_KEYS
     for (key, value) in config {
         if !CONFIG_KEYS.contains(&key.as_str()) {
             lines.push(format!("{}={}", key, value));
@@ -79,7 +104,7 @@ fn write_config(ctx: &Context, config: &HashMap<String, String>) -> Result<()> {
     Ok(())
 }
 
-/// Display the current config in a formatted way.
+/// Formats and prints the current configuration to stdout.
 fn show_config(ctx: &Context) -> Result<()> {
     if !ctx.env_file.exists() {
         println!("Config file not found: {}", ctx.env_file.display());
@@ -105,7 +130,6 @@ fn show_config(ctx: &Context) -> Result<()> {
         }
     }
 
-    // Show any extra keys
     for (key, value) in &config {
         if !CONFIG_KEYS.contains(&key.as_str()) {
             println!("{:width$}  {}", key, value, width = max_key_len);
@@ -115,7 +139,7 @@ fn show_config(ctx: &Context) -> Result<()> {
     Ok(())
 }
 
-/// Update the config with validated values.
+/// Validates and updates the configuration based on provided arguments.
 fn update_config(ctx: &Context, args: ConfigArgs) -> Result<()> {
     let mut config = read_config(ctx)?;
 
@@ -155,7 +179,7 @@ fn update_config(ctx: &Context, args: ConfigArgs) -> Result<()> {
     Ok(())
 }
 
-/// Validate that a path is an existing directory.
+/// Ensures that a path refers to an existing directory.
 fn validate_directory(path: &str, field_name: &str) -> Result<()> {
     let path = Path::new(path);
     if !path.exists() {
@@ -167,7 +191,7 @@ fn validate_directory(path: &str, field_name: &str) -> Result<()> {
     Ok(())
 }
 
-/// Validate that a string resembles a valid domain name.
+/// Validates that a string resembles a valid domain name.
 fn validate_domain(domain: &str) -> Result<()> {
     let domain_regex =
         Regex::new(r"^([a-zA-Z0-9]([a-zA-Z0-9\-]{0,61}[a-zA-Z0-9])?\.)+[a-zA-Z]{2,}$").unwrap();
@@ -181,7 +205,7 @@ fn validate_domain(domain: &str) -> Result<()> {
     Ok(())
 }
 
-/// Validate that a string is a valid email address.
+/// Validates that a string is a correctly formatted email address.
 fn validate_email(email: &str) -> Result<()> {
     let email_regex = Regex::new(r"^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$").unwrap();
 
@@ -194,7 +218,7 @@ fn validate_email(email: &str) -> Result<()> {
     Ok(())
 }
 
-/// Validate that a URL is valid and resolvable.
+/// Validates that a URL is well-formed and its host is network-resolvable.
 fn validate_acme_server(server: &str) -> Result<()> {
     let url = Url::parse(server)
         .with_context(|| format!("TRAEFIK_ACME_SERVER must be a valid URL: {}", server))?;
@@ -221,7 +245,7 @@ fn validate_acme_server(server: &str) -> Result<()> {
     Ok(())
 }
 
-/// Validate that a DOCKER_HOST value is valid.
+/// Validates a Docker host string (supporting `unix://`, `tcp://`, and `ssh://`).
 fn validate_docker_host(host: &str) -> Result<()> {
     if let Some(socket_path) = host.strip_prefix("unix://") {
         let path = Path::new(socket_path);
@@ -319,8 +343,6 @@ mod tests {
         }
     }
 
-    // ConfigArgs tests
-
     #[test]
     fn test_has_updates_none() {
         let args = ConfigArgs {
@@ -386,13 +408,10 @@ mod tests {
         assert!(args.has_updates());
     }
 
-    // read_config tests
-
     #[test]
     fn test_read_config_nonexistent_file() {
         let test_dir = TestDir::new("read-nonexistent");
         let ctx = test_dir.context();
-        // env_file does not exist
         let config = read_config(&ctx).unwrap();
         assert!(config.is_empty());
     }
@@ -460,7 +479,6 @@ mod tests {
     #[test]
     fn test_read_config_value_with_equals() {
         let test_dir = TestDir::new("read-equals");
-        // Value contains = sign
         test_dir.write_env("URL=https://example.com?foo=bar\n");
         let ctx = test_dir.context();
         let config = read_config(&ctx).unwrap();
@@ -504,8 +522,6 @@ mod tests {
         );
     }
 
-    // write_config tests
-
     #[test]
     fn test_write_config_empty() {
         let test_dir = TestDir::new("write-empty");
@@ -537,7 +553,6 @@ mod tests {
         config.insert("TRAEFIK_ACME_DOMAIN".to_string(), "example.com".to_string());
         write_config(&ctx, &config).unwrap();
         let content = test_dir.read_env();
-        // Check that keys appear in the expected order
         let data_pos = content.find("COMPOSE_DATA").unwrap();
         let base_pos = content.find("COMPOSE_BASE").unwrap();
         let domain_pos = content.find("TRAEFIK_ACME_DOMAIN").unwrap();
@@ -557,8 +572,6 @@ mod tests {
         assert!(content.contains("COMPOSE_DATA=/data"));
         assert!(content.contains("CUSTOM_KEY=custom_value"));
     }
-
-    // roundtrip tests
 
     #[test]
     fn test_read_write_roundtrip() {
@@ -601,8 +614,6 @@ mod tests {
         );
         assert_eq!(final_config.get("COMPOSE_BASE"), Some(&"/base".to_string()));
     }
-
-    // Domain validation tests
 
     #[test]
     fn test_validate_domain_simple() {
@@ -673,8 +684,6 @@ mod tests {
         assert!(validate_domain("..").is_err());
     }
 
-    // Email validation tests
-
     #[test]
     fn test_validate_email_simple() {
         assert!(validate_email("user@example.com").is_ok());
@@ -741,17 +750,13 @@ mod tests {
         assert!(validate_email("user@@example.com").is_err());
     }
 
-    // ACME server validation tests
-
     #[test]
     fn test_validate_acme_server_https() {
-        // Using a real resolvable domain
         assert!(validate_acme_server("https://acme-v02.api.letsencrypt.org/directory").is_ok());
     }
 
     #[test]
     fn test_validate_acme_server_http() {
-        // HTTP is allowed (for staging servers)
         assert!(validate_acme_server("http://localhost:8080/directory").is_ok());
     }
 
@@ -771,8 +776,6 @@ mod tests {
     fn test_validate_acme_server_unresolvable() {
         assert!(validate_acme_server("https://this-domain-does-not-exist-12345.invalid").is_err());
     }
-
-    // Docker host validation tests
 
     #[test]
     fn test_validate_docker_host_unix_exists() {
@@ -850,8 +853,6 @@ mod tests {
         assert!(validate_docker_host("localhost:2375").is_err());
     }
 
-    // Directory validation tests
-
     #[test]
     fn test_validate_directory_tmp() {
         assert!(validate_directory("/tmp", "TEST").is_ok());
@@ -884,8 +885,6 @@ mod tests {
         let err = result.unwrap_err().to_string();
         assert!(err.contains("MY_FIELD"));
     }
-
-    // Integration tests
 
     #[test]
     fn test_update_single_value_integration() {

@@ -1,3 +1,8 @@
+//! High-level command implementations for the application.
+//!
+//! Each submodule corresponds to a primary CLI action and contains the
+//! logic for service discovery, validation, and execution.
+
 pub mod config;
 pub mod deps;
 pub mod ps;

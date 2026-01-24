@@ -1,3 +1,8 @@
+//! Main entry point for the `compose` utility.
+//!
+//! This tool provides a systemd-integrated wrapper for managing Docker Compose projects,
+//! supporting both root and rootless Docker environments.
+
 use anyhow::Result;
 use clap::{Parser, Subcommand};
 
@@ -12,84 +17,91 @@ mod systemd;
 use crate::commands::{config, deps};
 use crate::core::get_context;
 
+/// Command-line interface for managing Docker Compose services with systemd.
 #[derive(Parser)]
 #[command(name = "compose")]
 #[command(about = "Utilities for managing Docker Compose services with Systemd", long_about = None)]
 struct Cli {
+    /// The subcommand to execute.
     #[command(subcommand)]
     command: Commands,
 }
 
+/// Available subcommands for the application.
 #[derive(Subcommand)]
 enum Commands {
-    /// Start services
+    /// Start services (systemctl start).
     #[command(visible_alias = "up")]
     Start {
-        /// Service names to start
+        /// List of service names to start.
         services: Vec<String>,
     },
-    /// Stop services
+    /// Stop services (systemctl stop).
     #[command(visible_alias = "down")]
     Stop {
-        /// Service names to stop
+        /// List of service names to stop.
         services: Vec<String>,
     },
-    /// Restart services
+    /// Restart services (systemctl restart).
     #[command(visible_alias = "reup")]
     Restart {
-        /// Service names to restart
+        /// List of service names to restart.
         services: Vec<String>,
     },
-    /// Update services (pull images, restart only if changed)
+    /// Pull new images and restart services if updated.
     Update {
-        /// Service names to update
+        /// List of service names to update.
         services: Vec<String>,
     },
-    /// Pull images for services without restarting
+    /// Pull images for services without restarting.
     Pull {
-        /// Service names to pull images for
+        /// List of service names to pull images for.
         services: Vec<String>,
     },
-    /// Show service status
+    /// Show service status (systemctl status).
     Status {
-        /// Service names to check
+        /// List of service names to check.
         services: Vec<String>,
     },
-    /// Enable services to start on boot
+    /// Enable services to start on boot (systemctl enable).
     Enable {
-        /// Service names to enable
+        /// List of service names to enable.
         services: Vec<String>,
     },
-    /// Disable services from starting on boot
+    /// Disable services from starting on boot (systemctl disable).
     Disable {
-        /// Service names to disable
+        /// List of service names to disable.
         services: Vec<String>,
     },
-    /// List all managed docker-compose services
+    /// List all managed Docker Compose services.
     #[command(visible_alias = "ls")]
     List,
-    /// List containers for services
+    /// List Docker containers and their statuses.
     Ps {
-        /// Service names to check. Optional if in a compose project directory.
+        /// List of service names to filter by (optional).
         services: Vec<String>,
     },
-    /// View service logs (journalctl wrapper)
+    /// View service logs via journalctl.
     Logs {
-        /// Service name (e.g., myapp or genai-ollama or genai/ollama). Optional if in a compose project directory.
+        /// Name of the service to show logs for.
         service: Option<String>,
-        /// Follow log output
+        /// Follow log output in real-time.
         #[arg(short, long)]
         follow: bool,
-        /// Number of lines to show
+        /// Number of recent log lines to display.
         #[arg(short = 'n', long)]
         lines: Option<usize>,
     },
-    /// Manage service dependencies
+    /// Manage service dependencies.
     Deps(deps::DepsArgs),
-    /// View or update configuration
+    /// View or update global configuration.
     Config(config::ConfigArgs),
 }
 
+/// Entry point of the application.
+///
+/// Parses command-line arguments, initializes the execution context,
+/// and dispatches the command to the appropriate handler.
 #[tokio::main]
 async fn main() -> Result<()> {
     let cli = Cli::parse();

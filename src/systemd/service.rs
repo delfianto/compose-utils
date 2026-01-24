@@ -1,10 +1,19 @@
+//! Logic for interacting with systemd services and resolving service names.
+
 use crate::core::Context;
 use anyhow::{Context as _, Result};
 use std::path::PathBuf;
 use std::process::Command;
 
-/// Convert project name to directory path.
-/// Handles both flat names (test-project) and nested names (genai-ollama -> genai/ollama).
+/// Converts a project name to its corresponding directory path.
+///
+/// Handles both literal paths (e.g., `genai/ollama`) and flat names that
+/// map to nested structures (e.g., `genai-ollama` -> `genai/ollama`).
+///
+/// # Arguments
+///
+/// * `ctx` - The application context.
+/// * `name` - The project name or path segment.
 pub fn name_to_dir_path(ctx: &Context, name: &str) -> String {
     if name.contains('/') {
         return name.to_string();
@@ -24,27 +33,57 @@ pub fn name_to_dir_path(ctx: &Context, name: &str) -> String {
     name.to_string()
 }
 
-/// Convert project name to systemd service name.
-/// Both `genai-ollama` and `genai/ollama` become `compose@genai-ollama.service`.
+/// Converts a project name to a systemd service unit name.
+///
+/// Standardizes naming to the `compose@<name>.service` format.
+/// Slashes are replaced with hyphens.
+///
+/// # Arguments
+///
+/// * `name` - The project name.
 pub fn name_to_service(name: &str) -> String {
     let normalized = name.replace('/', "-");
     format!("compose@{}.service", normalized)
 }
 
-/// Extract the bare project name from various input formats.
-/// Strips `compose@` prefix and `.service` suffix if present.
+/// Extracts the bare project name from a service unit string.
+///
+/// Strips the `compose@` prefix and `.service` suffix if they exist.
+///
+/// # Arguments
+///
+/// * `service` - The service unit name (e.g., `compose@myapp.service`).
 pub fn get_bare_name(service: &str) -> &str {
     let s = service.strip_suffix(".service").unwrap_or(service);
     s.strip_prefix("compose@").unwrap_or(s)
 }
 
-/// Get the compose directory for a project.
+/// Resolves the absolute filesystem path for a compose project's directory.
+///
+/// # Arguments
+///
+/// * `ctx` - The application context.
+/// * `name` - The project name.
 pub fn get_compose_dir(ctx: &Context, name: &str) -> PathBuf {
     let bare = get_bare_name(name);
     let dir_path = name_to_dir_path(ctx, bare);
     ctx.compose_base.join(dir_path)
 }
 
+/// Invokes `systemctl` for a set of services.
+///
+/// Automatically handles both root and rootless (user) systemd instances
+/// based on the [`Context`].
+///
+/// # Arguments
+///
+/// * `ctx` - The application context.
+/// * `action` - The systemctl action to perform (e.g., "start", "stop", "status").
+/// * `services` - A list of service names.
+///
+/// # Errors
+///
+/// Returns an error if the `systemctl` command fails to execute or returns a non-zero exit code.
 pub fn run_systemctl(ctx: &Context, action: &str, services: &[String]) -> Result<()> {
     let mut cmd = Command::new(&ctx.systemctl_cmd[0]);
     if ctx.systemctl_cmd.len() > 1 {
@@ -60,7 +99,6 @@ pub fn run_systemctl(ctx: &Context, action: &str, services: &[String]) -> Result
     println!("Running: {:?}", cmd);
     let status = cmd.status().context("Failed to execute systemctl")?;
 
-    // If the action was start, stop or restart, show status afterwards
     if action == "start" || action == "stop" || action == "restart" {
         println!("\nService status:");
         let mut status_cmd = Command::new(&ctx.systemctl_cmd[0]);
@@ -196,6 +234,14 @@ mod tests {
         test_dir.create_dir("genai/ollama");
         let ctx = test_context(test_dir.path());
         assert_eq!(name_to_dir_path(&ctx, "genai-ollama"), "genai/ollama");
+    }
+
+    #[test]
+    fn test_name_to_dir_path_converted() {
+        let test_dir = TestDir::new("dir-path-conv");
+        test_dir.create_dir("a/b/c");
+        let ctx = test_context(test_dir.path());
+        assert_eq!(name_to_dir_path(&ctx, "a-b-c"), "a/b/c");
     }
 
     #[test]
