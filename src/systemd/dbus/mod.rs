@@ -1,8 +1,5 @@
-//! D-Bus connection management for systemd integration.
-
 pub mod manager;
 pub mod types;
-pub mod unit;
 
 use anyhow::{Context, Result};
 use zbus::Connection;

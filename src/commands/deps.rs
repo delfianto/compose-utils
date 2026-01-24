@@ -1,7 +1,6 @@
 //! Logic for managing dependencies between systemd services using drop-in overrides.
 
 use crate::core::Context;
-use crate::systemd::client::SystemdClient;
 use anyhow::Result;
 use clap::Args;
 use std::collections::HashMap;
@@ -69,9 +68,7 @@ async fn clear_deps(ctx: &Context, service: &str) -> Result<()> {
     if override_file.exists() {
         println!("Clearing dependencies for {}...", service);
         fs::remove_file(&override_file)?;
-
-        let systemd = SystemdClient::new(!ctx.is_root).await?;
-        systemd.reload_daemon().await?;
+        crate::systemd::manager::daemon_reload(ctx)?;
     } else {
         println!("No dependencies found for {}", service);
     }
@@ -301,12 +298,10 @@ async fn remove_deps(ctx: &Context, service: &str, deps_to_remove: &[String]) ->
 /// Logic for the `list` action.
 async fn list_deps(ctx: &Context, service: &str) -> Result<()> {
     let service_name = crate::systemd::service::normalize_unit_name(ctx, service);
-    let systemd = SystemdClient::new(!ctx.is_root).await?;
 
     println!("Dependency tree for {}:", service_name);
-    match systemd.get_dependency_tree(&service_name).await {
-        Ok(tree) => tree.print(0),
-        Err(e) => println!("  Failed to retrieve dependency tree: {}", e),
+    if let Err(e) = crate::systemd::manager::list_dependencies(ctx, Some(&service_name)) {
+        println!("  Failed to retrieve dependency tree: {}", e);
     }
 
     // Also show explicit overrides if they exist
