@@ -100,11 +100,11 @@ pub fn ensure_symlink(ctx: &Context, name: &str) -> Result<()> {
 ///
 /// Returns an error if the symlink exists but cannot be removed.
 pub fn remove_symlink(ctx: &Context, name: &str) -> Result<()> {
-    if let Some(symlink_path) = get_symlink_path(ctx, name) {
-        if symlink_path.is_symlink() {
-            println!("Removing symlink: {}", symlink_path.display());
-            fs::remove_file(&symlink_path)?;
-        }
+    if let Some(symlink_path) = get_symlink_path(ctx, name)
+        && symlink_path.is_symlink()
+    {
+        println!("Removing symlink: {}", symlink_path.display());
+        fs::remove_file(&symlink_path)?;
     }
     Ok(())
 }
@@ -146,7 +146,7 @@ mod tests {
     fn test_ensure_and_remove_symlink() {
         let dir = tempdir().unwrap();
         let ctx = test_context(dir.path());
-        
+
         // Ensure the nested directory exists
         let project_rel_path = "nested/project";
         let project_path = dir.path().join(project_rel_path);
@@ -159,7 +159,7 @@ mod tests {
         // Create symlink
         ensure_symlink(&ctx, service_name).unwrap();
         assert!(symlink_path.is_symlink());
-        
+
         // Canonicalize both paths to ensure we are comparing absolute paths correctly
         let target = fs::read_link(&symlink_path).unwrap();
         let target_absolute = if target.is_absolute() {
@@ -167,7 +167,7 @@ mod tests {
         } else {
             ctx.compose_base.join(target)
         };
-        
+
         assert_eq!(
             target_absolute.canonicalize().unwrap(),
             project_path.canonicalize().unwrap()
