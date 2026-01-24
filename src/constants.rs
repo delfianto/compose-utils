@@ -13,6 +13,8 @@ pub const ENV_FILE_NAME: &str = "compose.env";
 pub const USER_COMPOSE_BASE_NAME: &str = "compose-projects";
 /// Relative path from user's config home to systemd user unit directory.
 pub const USER_SYSTEMD_DIR_REL: &str = "systemd/user";
+/// Relative path from user's config home to the environment file directory.
+pub const USER_ENV_DIR_REL: &str = "docker";
 /// Name of the Docker socket file in rootless mode.
 pub const USER_DOCKER_SOCKET_NAME: &str = "docker.sock";
 

@@ -10,6 +10,7 @@ Type=oneshot
 RemainAfterExit=yes
 EnvironmentFile=-/etc/compose.env
 EnvironmentFile=-%h/.config/compose.env
+EnvironmentFile=-%h/.config/docker/compose.env
 WorkingDirectory=${compose_base}/%I
 ExecStart=${compose_bin_path} up --wait --remove-orphans
 ExecStop=${compose_bin_path} down --remove-orphans

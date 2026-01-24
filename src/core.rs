@@ -62,14 +62,15 @@ pub fn get_context() -> Result<Context> {
 
         let docker_host = config.get("DOCKER_HOST").cloned();
 
-        Ok(Context {
+        return Ok(Context {
             is_root: true,
             systemd_dir: PathBuf::from(constants::ROOT_SYSTEMD_DIR),
             compose_base,
             env_file,
             docker_host,
-        })
-    } else {
+        });
+    }
+
         let base_dirs = BaseDirs::new().context("Could not determine user home directory")?;
         let xdg_config = env::var_os("XDG_CONFIG_HOME")
             .map(PathBuf::from)
@@ -85,7 +86,9 @@ pub fn get_context() -> Result<Context> {
         let _ =
             detect_and_validate_mode(false, &env_vars, Path::new(constants::ROOT_DOCKER_SOCKET))?;
 
-        let env_file = xdg_config.join(constants::ENV_FILE_NAME);
+        let env_file = xdg_config
+            .join(constants::USER_ENV_DIR_REL)
+            .join(constants::ENV_FILE_NAME);
         let config = read_env_file(&env_file)?;
 
         let compose_base = config
@@ -95,14 +98,13 @@ pub fn get_context() -> Result<Context> {
 
         let docker_host = config.get("DOCKER_HOST").cloned();
 
-        Ok(Context {
+        return Ok(Context {
             is_root: false,
             systemd_dir: xdg_config.join(constants::USER_SYSTEMD_DIR_REL),
             compose_base,
             env_file,
             docker_host,
-        })
-    }
+        });
 }
 
 /// Reads a simple KEY=VALUE environment file into a [`HashMap`].

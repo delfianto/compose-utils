@@ -48,6 +48,7 @@ class Config:
             self.bin_dir = Path("/usr/local/bin")
             self.systemd_dir = Path("/etc/systemd/system")
             self.env_file = Path("/etc/compose.env")
+            self.old_env_file = None
             self.data_base = (
                 Path(args.compose_data) if args.compose_data else Path("/srv/appdata")
             )
@@ -59,7 +60,8 @@ class Config:
         else:
             self.bin_dir = Path.home() / ".local/bin"
             self.systemd_dir = Path(self.xdg_config_home) / "systemd/user"
-            self.env_file = Path(self.xdg_config_home) / "compose.env"
+            self.env_file = Path(self.xdg_config_home) / "docker" / "compose.env"
+            self.old_env_file = Path(self.xdg_config_home) / "compose.env"
             self.data_base = (
                 Path(args.compose_data)
                 if args.compose_data
@@ -158,6 +160,13 @@ def install(cfg: Config) -> None:
 
     # Generate env file (only if it doesn't exist)
     print(f"Checking env file at {cfg.env_file}...")
+
+    # Migrate from old location if it exists
+    if cfg.mode == "rootless" and cfg.old_env_file.exists() and not cfg.env_file.exists():
+        print(f"Migrating existing env file from {cfg.old_env_file} to {cfg.env_file}...")
+        cfg.env_file.parent.mkdir(parents=True, exist_ok=True)
+        shutil.move(str(cfg.old_env_file), str(cfg.env_file))
+
     cfg.env_file.parent.mkdir(parents=True, exist_ok=True)
 
     if not cfg.env_file.exists():
@@ -239,6 +248,12 @@ def uninstall(cfg: Config) -> None:
 def reinstall(cfg: Config) -> None:
     """Reinstall the binary and service file based on existing configuration."""
     print(f"Reinstalling for {cfg.mode} mode...")
+
+    # Migrate from old location if it exists
+    if cfg.mode == "rootless" and cfg.old_env_file.exists() and not cfg.env_file.exists():
+        print(f"Migrating existing env file from {cfg.old_env_file} to {cfg.env_file}...")
+        cfg.env_file.parent.mkdir(parents=True, exist_ok=True)
+        shutil.move(str(cfg.old_env_file), str(cfg.env_file))
 
     if not cfg.env_file.exists():
         print(f"Error: Environment file not found at {cfg.env_file}")
