@@ -96,13 +96,13 @@ pub fn get_context() -> Result<Context> {
 
     let docker_host = config.get("DOCKER_HOST").cloned();
 
-    return Ok(Context {
+    Ok(Context {
         is_root: false,
         systemd_dir: xdg_config.join(constants::USER_SYSTEMD_DIR_REL),
         compose_base,
         env_file,
         docker_host,
-    });
+    })
 }
 
 /// Reads a simple KEY=VALUE environment file into a [`HashMap`].

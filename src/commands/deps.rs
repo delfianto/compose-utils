@@ -59,28 +59,7 @@ pub async fn run(ctx: &Context, args: DepsArgs) -> Result<()> {
 }
 
 async fn list_all_deps(ctx: &Context) -> Result<()> {
-    use std::process::Command;
-
-    let mut cmd = if ctx.is_root {
-        Command::new("systemctl")
-    } else {
-        let mut c = Command::new("systemctl");
-        c.arg("--user");
-        c
-    };
-
-    cmd.arg("list-dependencies")
-        .arg("--after")
-        .arg("--reverse")
-        .arg("docker.service");
-
-    let status = cmd.status()?;
-
-    if !status.success() {
-        anyhow::bail!("Failed to list dependencies via systemctl");
-    }
-
-    Ok(())
+    crate::systemd::manager::list_dependencies(ctx, None)
 }
 
 /// Normalizes a project name into a full systemd service name (e.g., `compose@myapp.service`).

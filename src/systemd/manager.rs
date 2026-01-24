@@ -109,6 +109,53 @@ pub fn remove_symlink(ctx: &Context, name: &str) -> Result<()> {
     Ok(())
 }
 
+/// Lists dependencies for a given unit or the default target.
+pub fn list_dependencies(ctx: &Context, unit: Option<&str>) -> Result<()> {
+    use std::process::Command;
+
+    let mut cmd = if ctx.is_root {
+        Command::new("systemctl")
+    } else {
+        let mut c = Command::new("systemctl");
+        c.arg("--user");
+        c
+    };
+
+    cmd.arg("list-dependencies").arg("--after").arg("--reverse");
+
+    if let Some(u) = unit {
+        cmd.arg(u);
+    } else {
+        cmd.arg("docker.service");
+    }
+
+    let status = cmd.status()?;
+
+    if !status.success() {
+        bail!("Failed to list dependencies via systemctl");
+    }
+
+    Ok(())
+}
+
+/// Shows the status of a specific unit.
+pub fn show_status(ctx: &Context, unit: &str) -> Result<()> {
+    use std::process::Command;
+
+    let mut cmd = if ctx.is_root {
+        Command::new("systemctl")
+    } else {
+        let mut c = Command::new("systemctl");
+        c.arg("--user");
+        c
+    };
+
+    cmd.arg("status").arg(unit).arg("--lines=0");
+
+    let _ = cmd.status()?;
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

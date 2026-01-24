@@ -234,26 +234,11 @@ pub async fn run_status(ctx: &Context, names: &[String]) -> Result<()> {
         return Ok(());
     }
 
-    use std::process::Command;
-
     for name in services {
         let bare = get_bare_name(&name);
         let unit_name = name_to_service(bare);
 
-        let mut cmd = if ctx.is_root {
-            Command::new("systemctl")
-        } else {
-            let mut c = Command::new("systemctl");
-            c.arg("--user");
-            c
-        };
-
-        cmd.arg("status").arg(&unit_name).arg("--lines=0");
-
-        // We execute status sequentially. Users usually run this on small sets.
-        // systemctl status exits non-zero if service is stopped, which is fine to show.
-        // We let systemctl output directly to stdout/stderr.
-        let _ = cmd.status()?;
+        crate::systemd::manager::show_status(ctx, &unit_name)?;
         println!();
     }
 
