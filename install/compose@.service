@@ -1,7 +1,8 @@
 [Unit]
 Description=Compose Service for %i
-Wants=docker.service
+Requires=docker.service
 After=docker.service
+BindsTo=docker.service
 StartLimitBurst=5
 StartLimitIntervalSec=100
 

@@ -12,10 +12,18 @@ pub struct ServiceConfig {
     /// List of services that must be started before this service.
     /// Maps to `Requires=` and `After=` in systemd.
     pub requires: Option<Vec<String>>,
-    
+
     /// List of services that this service wants to start with.
     /// Maps to `Wants=` and `After=` in systemd.
     pub wants: Option<Vec<String>>,
+
+    /// List of services that this service is bound to.
+    /// Maps to `BindsTo=` and `After=` in systemd.
+    pub binds_to: Option<Vec<String>>,
+
+    /// List of services that this service should start after.
+    /// Maps explicitly to `After=` in systemd.
+    pub after: Option<Vec<String>>,
 }
 
 /// Represents the top-level structure of the dependencies TOML file.
@@ -71,10 +79,34 @@ mod tests {
         assert!(bifrost.wants.is_none());
 
         let webui = config.services.get("open-webui").unwrap();
-        assert_eq!(webui.requires.as_ref().unwrap(), &vec!["pgvector", "bifrost"]);
-        assert_eq!(webui.wants.as_ref().unwrap(), &vec!["ollama", "qdrant", "classifier"]);
+        assert_eq!(
+            webui.requires.as_ref().unwrap(),
+            &vec!["pgvector", "bifrost"]
+        );
+        assert_eq!(
+            webui.wants.as_ref().unwrap(),
+            &vec!["ollama", "qdrant", "classifier"]
+        );
     }
-    
+
+    #[test]
+    fn test_parse_expanded_dependencies() {
+        let toml_content = r#"
+            [dependencies.db]
+            binds_to = ["docker"]
+            after = ["docker", "network"]
+        "#;
+
+        let mut file = NamedTempFile::new().unwrap();
+        write!(file, "{}", toml_content).unwrap();
+
+        let config = load_dependencies(file.path()).unwrap();
+        let db = config.services.get("db").unwrap();
+
+        assert_eq!(db.binds_to.as_ref().unwrap(), &vec!["docker"]);
+        assert_eq!(db.after.as_ref().unwrap(), &vec!["docker", "network"]);
+    }
+
     #[test]
     fn test_parse_empty() {
         let toml_content = "";

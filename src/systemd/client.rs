@@ -24,8 +24,6 @@ pub struct UnitInfo {
 #[derive(Debug, Clone)]
 pub struct UnitProperties {
     pub state: UnitState,
-    pub sub_state: SubState,
-    pub description: String,
     #[allow(dead_code)]
     pub main_pid: Option<u32>,
     #[allow(dead_code)]
@@ -106,8 +104,6 @@ impl SystemdClient {
 
         Ok(UnitProperties {
             state: UnitState::from_dbus(&unit_proxy.active_state().await?),
-            sub_state: SubState::from_dbus(&unit_proxy.sub_state().await?),
-            description: unit_proxy.description().await.unwrap_or_default(),
             main_pid: None, // Would need Service interface
             memory_current: None,
             requires: unit_proxy.requires().await.unwrap_or_default(),

@@ -13,7 +13,7 @@ use std::path::{Path, PathBuf};
 pub struct DepsArgs {
     /// The name of the service to manage dependencies for.
     #[arg(help = "Service name")]
-    pub service: String,
+    pub service: Option<String>,
 
     /// Add one or more services as dependencies.
     #[arg(long, help = "Add dependencies")]
@@ -39,13 +39,48 @@ pub struct DepsArgs {
 /// * `ctx` - The application context.
 /// * `args` - The parsed command arguments.
 pub async fn run(ctx: &Context, args: DepsArgs) -> Result<()> {
-    if let Some(deps) = &args.add {
-        add_deps(ctx, &args.service, deps, args.requires).await
-    } else if let Some(deps) = &args.remove {
-        remove_deps(ctx, &args.service, deps).await
-    } else {
-        list_deps(ctx, &args.service).await
+    match args.service {
+        Some(service) => {
+            if let Some(deps) = &args.add {
+                add_deps(ctx, &service, deps, args.requires).await
+            } else if let Some(deps) = &args.remove {
+                remove_deps(ctx, &service, deps).await
+            } else {
+                list_deps(ctx, &service).await
+            }
+        }
+        None => {
+            if args.add.is_some() || args.remove.is_some() {
+                anyhow::bail!("Cannot add or remove dependencies without specifying a service.");
+            }
+            list_all_deps(ctx).await
+        }
     }
+}
+
+async fn list_all_deps(ctx: &Context) -> Result<()> {
+    use std::process::Command;
+
+    let mut cmd = if ctx.is_root {
+        Command::new("systemctl")
+    } else {
+        let mut c = Command::new("systemctl");
+        c.arg("--user");
+        c
+    };
+
+    cmd.arg("list-dependencies")
+        .arg("--after")
+        .arg("--reverse")
+        .arg("docker.service");
+
+    let status = cmd.status()?;
+
+    if !status.success() {
+        anyhow::bail!("Failed to list dependencies via systemctl");
+    }
+
+    Ok(())
 }
 
 /// Normalizes a project name into a full systemd service name (e.g., `compose@myapp.service`).
@@ -87,6 +122,7 @@ fn parse_override_file(override_file: &Path) -> Result<SystemdDeps> {
     let mut deps: SystemdDeps = HashMap::new();
     deps.insert("Requires".to_string(), Vec::new());
     deps.insert("Wants".to_string(), Vec::new());
+    deps.insert("BindsTo".to_string(), Vec::new());
     deps.insert("After".to_string(), Vec::new());
 
     if !override_file.exists() {
@@ -193,11 +229,6 @@ pub fn apply_dependencies(
     let override_file = get_override_file(ctx, service);
 
     fs::create_dir_all(&override_dir)?;
-
-    // We start with existing deps to preserve anything manually added?
-    // Or do we start fresh? The user request implies defining startup order.
-    // Let's assume we read existing just to be safe, but we might want to
-    // consider a "clean" application in the future.
     let mut current_deps = parse_override_file(&override_file)?;
 
     if let Some(requires) = &config.requires {
@@ -206,6 +237,21 @@ pub fn apply_dependencies(
 
     if let Some(wants) = &config.wants {
         update_deps_list(&mut current_deps, "Wants", wants);
+    }
+
+    if let Some(binds) = &config.binds_to {
+        update_deps_list(&mut current_deps, "BindsTo", binds);
+    }
+
+    // Process explicit After.
+    if let Some(after) = &config.after {
+        for item in after {
+            let name = get_compose_service_name(item);
+            let list = current_deps.entry("After".to_string()).or_default();
+            if !list.contains(&name) {
+                list.push(name);
+            }
+        }
     }
 
     write_override_file(&override_file, &current_deps)?;
@@ -221,7 +267,6 @@ fn update_deps_list(deps: &mut SystemdDeps, key: &str, items: &[String]) {
             list.push(name.clone());
         }
 
-        // Always add to After as well
         let after_list = deps.entry("After".to_string()).or_default();
         if !after_list.contains(&name) {
             after_list.push(name);
@@ -359,6 +404,8 @@ mod tests {
         let config = crate::compose::dependencies::ServiceConfig {
             requires: Some(vec!["pgvector".to_string()]),
             wants: Some(vec!["ollama".to_string()]),
+            binds_to: None,
+            after: None,
         };
 
         apply_dependencies(&ctx, "myapp", &config).unwrap();

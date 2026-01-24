@@ -71,40 +71,38 @@ pub fn get_context() -> Result<Context> {
         });
     }
 
-        let base_dirs = BaseDirs::new().context("Could not determine user home directory")?;
-        let xdg_config = env::var_os("XDG_CONFIG_HOME")
-            .map(PathBuf::from)
-            .unwrap_or_else(|| base_dirs.home_dir().join(".config"));
+    let base_dirs = BaseDirs::new().context("Could not determine user home directory")?;
+    let xdg_config = env::var_os("XDG_CONFIG_HOME")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| base_dirs.home_dir().join(".config"));
 
-        let uid = getuid();
-        let runtime_dir =
-            env::var("XDG_RUNTIME_DIR").unwrap_or_else(|_| format!("/run/user/{}", uid));
+    let uid = getuid();
+    let runtime_dir = env::var("XDG_RUNTIME_DIR").unwrap_or_else(|_| format!("/run/user/{}", uid));
 
-        let mut env_vars = HashMap::new();
-        env_vars.insert("XDG_RUNTIME_DIR".to_string(), runtime_dir.clone());
+    let mut env_vars = HashMap::new();
+    env_vars.insert("XDG_RUNTIME_DIR".to_string(), runtime_dir.clone());
 
-        let _ =
-            detect_and_validate_mode(false, &env_vars, Path::new(constants::ROOT_DOCKER_SOCKET))?;
+    let _ = detect_and_validate_mode(false, &env_vars, Path::new(constants::ROOT_DOCKER_SOCKET))?;
 
-        let env_file = xdg_config
-            .join(constants::USER_ENV_DIR_REL)
-            .join(constants::ENV_FILE_NAME);
-        let config = read_env_file(&env_file)?;
+    let env_file = xdg_config
+        .join(constants::USER_ENV_DIR_REL)
+        .join(constants::ENV_FILE_NAME);
+    let config = read_env_file(&env_file)?;
 
-        let compose_base = config
-            .get("COMPOSE_BASE")
-            .map(PathBuf::from)
-            .unwrap_or_else(|| base_dirs.home_dir().join(constants::USER_COMPOSE_BASE_NAME));
+    let compose_base = config
+        .get("COMPOSE_BASE")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| base_dirs.home_dir().join(constants::USER_COMPOSE_BASE_NAME));
 
-        let docker_host = config.get("DOCKER_HOST").cloned();
+    let docker_host = config.get("DOCKER_HOST").cloned();
 
-        return Ok(Context {
-            is_root: false,
-            systemd_dir: xdg_config.join(constants::USER_SYSTEMD_DIR_REL),
-            compose_base,
-            env_file,
-            docker_host,
-        });
+    return Ok(Context {
+        is_root: false,
+        systemd_dir: xdg_config.join(constants::USER_SYSTEMD_DIR_REL),
+        compose_base,
+        env_file,
+        docker_host,
+    });
 }
 
 /// Reads a simple KEY=VALUE environment file into a [`HashMap`].

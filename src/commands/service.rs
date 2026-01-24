@@ -21,18 +21,22 @@ pub async fn run_start(ctx: &Context, names: &[String], deps_path: Option<String
     if let Some(path) = deps_path {
         let path = std::path::Path::new(&path);
         println!("Loading dependencies from {}...", path.display());
-        let config = crate::compose::dependencies::load_dependencies(path)?;
 
+        let config = crate::compose::dependencies::load_dependencies(path)?;
         let mut updated = false;
-        // Apply dependencies for all services defined in the file
+
         for (service_name, service_config) in &config.services {
-            if crate::systemd::discovery::resolve_service(ctx, service_name).is_ok() {
+            let bare = get_bare_name(service_name);
+            let dir = get_compose_dir(ctx, bare);
+
+            if dir.exists() {
                 crate::commands::deps::apply_dependencies(ctx, service_name, service_config)?;
                 updated = true;
             } else {
                 println!(
-                    "Warning: Service '{}' defined in dependency file not found in projects.",
-                    service_name
+                    "Warning: Service '{}' defined in dependency file not found in projects (checked at {}).",
+                    service_name,
+                    dir.display()
                 );
             }
         }
@@ -134,7 +138,6 @@ pub async fn run_restart(ctx: &Context, names: &[String]) -> Result<()> {
         let compose_dir = get_compose_dir(ctx, bare);
         let unit_name = name_to_service(bare);
 
-        // Check and pull images before restart
         let images = get_required_images(&compose_dir)?;
         if !images.is_empty() {
             let mut missing = Vec::new();
@@ -224,7 +227,6 @@ pub async fn run_logs(
 
 /// Executes the `status` command for a set of services.
 pub async fn run_status(ctx: &Context, names: &[String]) -> Result<()> {
-    let systemd = SystemdClient::new(!ctx.is_root).await?;
     let services = resolve_services(ctx, names)?;
 
     if services.is_empty() {
@@ -232,33 +234,27 @@ pub async fn run_status(ctx: &Context, names: &[String]) -> Result<()> {
         return Ok(());
     }
 
+    use std::process::Command;
+
     for name in services {
         let bare = get_bare_name(&name);
         let unit_name = name_to_service(bare);
 
-        match systemd.get_unit_properties(&unit_name).await {
-            Ok(props) => {
-                println!("● {} - {}", bare, props.description);
-                println!("   Active: {:?} ({:?})", props.state, props.sub_state);
-                if !props.requires.is_empty() {
-                    println!("   Requires: {}", props.requires.join(", "));
-                }
-                if !props.wants.is_empty() {
-                    println!("   Wants: {}", props.wants.join(", "));
-                }
-                if !props.after.is_empty() {
-                    println!("   After: {}", props.after.join(", "));
-                }
-                if !props.before.is_empty() {
-                    println!("   Before: {}", props.before.join(", "));
-                }
-                println!();
-            }
-            Err(e) => {
-                println!("○ {} - Could not retrieve status: {}", bare, e);
-                println!();
-            }
-        }
+        let mut cmd = if ctx.is_root {
+            Command::new("systemctl")
+        } else {
+            let mut c = Command::new("systemctl");
+            c.arg("--user");
+            c
+        };
+
+        cmd.arg("status").arg(&unit_name).arg("--lines=0");
+
+        // We execute status sequentially. Users usually run this on small sets.
+        // systemctl status exits non-zero if service is stopped, which is fine to show.
+        // We let systemctl output directly to stdout/stderr.
+        let _ = cmd.status()?;
+        println!();
     }
 
     Ok(())
@@ -284,13 +280,17 @@ pub async fn run_enable(ctx: &Context, names: &[String], deps_path: Option<Strin
 
         let mut updated = false;
         for (service_name, service_config) in &config.services {
-            if crate::systemd::discovery::resolve_service(ctx, service_name).is_ok() {
+            let bare = get_bare_name(service_name);
+            let dir = get_compose_dir(ctx, bare);
+
+            if dir.exists() {
                 crate::commands::deps::apply_dependencies(ctx, service_name, service_config)?;
                 updated = true;
             } else {
                 println!(
-                    "Warning: Service '{}' defined in dependency file not found in projects.",
-                    service_name
+                    "Warning: Service '{}' defined in dependency file not found in projects (checked at {}).",
+                    service_name,
+                    dir.display()
                 );
             }
         }

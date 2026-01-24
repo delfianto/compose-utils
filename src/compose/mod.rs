@@ -3,7 +3,7 @@
 //! Provides utilities for reading `.env` files, discovering project
 //! structures, and extracting image definitions.
 
+pub mod dependencies;
 pub mod env;
 pub mod project;
 pub mod types;
-pub mod dependencies;
