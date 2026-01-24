@@ -1,27 +1,41 @@
 use crate::constants::COMPOSE_FILES;
 use crate::core::Context;
 use anyhow::{Context as _, Result, bail};
+use bollard::Docker;
+use bollard::query_parameters::{CreateImageOptions, ListContainersOptions};
+use chrono::DateTime;
 use colored::*;
+use futures_util::StreamExt;
 use regex::Regex;
 use serde::Deserialize;
 use std::collections::HashMap;
 use std::env;
 use std::fs;
+use std::io::{self, Write};
 use std::os::unix::fs::symlink;
 use std::path::{Path, PathBuf};
-use std::process::{Command, Stdio};
+use std::process::Command;
 
-#[derive(Deserialize, Debug)]
-#[serde(rename_all = "PascalCase")]
-struct DockerContainer {
-    #[serde(rename = "ID")]
-    id: String,
-    names: String,
-    image: String,
-    created_at: String,
-    state: String,
-    status: String,
-    ports: String,
+/// Connect to Docker using the configured DOCKER_HOST from compose.env
+fn connect_docker(ctx: &Context) -> Result<Docker> {
+    match &ctx.docker_host {
+        Some(host) => {
+            if let Some(socket_path) = host.strip_prefix("unix://") {
+                Docker::connect_with_unix(socket_path, 120, bollard::API_DEFAULT_VERSION)
+                    .with_context(|| format!("Failed to connect to Docker socket: {}", socket_path))
+            } else if host.starts_with("tcp://") {
+                Docker::connect_with_http(host, 120, bollard::API_DEFAULT_VERSION)
+                    .with_context(|| format!("Failed to connect to Docker via TCP: {}", host))
+            } else {
+                bail!(
+                    "Unsupported DOCKER_HOST format: {}. Use unix:// or tcp://",
+                    host
+                )
+            }
+        }
+        None => Docker::connect_with_socket_defaults()
+            .context("Failed to connect to Docker API (no DOCKER_HOST configured)"),
+    }
 }
 
 /// Struct representing a subset of docker-compose.yml structure for image parsing
@@ -180,23 +194,20 @@ fn find_all_services(ctx: &Context) -> Result<Vec<String>> {
             let path = entry.path();
             if path.is_dir() {
                 subdirs.push(path);
-            } else if path.is_file() {
-                if let Some(name) = path.file_name().and_then(|n| n.to_str()) {
-                    if COMPOSE_FILES.contains(&name) {
-                        is_project = true;
-                    }
-                }
+            } else if path.is_file()
+                && let Some(name) = path.file_name().and_then(|n| n.to_str())
+                && COMPOSE_FILES.contains(&name)
+            {
+                is_project = true;
             }
         }
 
-        if is_project {
-            if let Ok(rel_path) = current.strip_prefix(base) {
-                if let Some(s) = rel_path.to_str() {
-                    if !s.is_empty() {
-                        services.push(s.replace([std::path::MAIN_SEPARATOR, '/'], "-"));
-                    }
-                }
-            }
+        if is_project
+            && let Ok(rel_path) = current.strip_prefix(base)
+            && let Some(s) = rel_path.to_str()
+            && !s.is_empty()
+        {
+            services.push(s.replace([std::path::MAIN_SEPARATOR, '/'], "-"));
         }
 
         // Continue searching subdirectories regardless of whether this dir is a project
@@ -284,7 +295,9 @@ pub fn run_restart(ctx: &Context, services: &[String]) -> Result<()> {
 }
 
 /// Pull images for services without restarting
-pub fn run_pull(ctx: &Context, services: &[String]) -> Result<()> {
+pub async fn run_pull(ctx: &Context, services: &[String]) -> Result<()> {
+    let docker = connect_docker(ctx)?;
+
     let services = resolve_services(ctx, services)?;
     validate_compose_dirs(ctx, &services)?;
 
@@ -300,7 +313,7 @@ pub fn run_pull(ctx: &Context, services: &[String]) -> Result<()> {
             continue;
         }
 
-        pull_images(&images)?;
+        pull_images(&docker, &images).await?;
     }
 
     println!("{} All images pulled successfully.", "OK".green());
@@ -308,7 +321,9 @@ pub fn run_pull(ctx: &Context, services: &[String]) -> Result<()> {
 }
 
 /// Update services: pull images, detect changes, restart only if needed
-pub fn run_update(ctx: &Context, services: &[String]) -> Result<()> {
+pub async fn run_update(ctx: &Context, services: &[String]) -> Result<()> {
+    let docker = connect_docker(ctx)?;
+
     let services = resolve_services(ctx, services)?;
     validate_compose_dirs(ctx, &services)?;
 
@@ -329,18 +344,18 @@ pub fn run_update(ctx: &Context, services: &[String]) -> Result<()> {
         // Capture current image states
         let mut pre_pull_hashes = HashMap::new();
         for image in &images {
-            let hash = get_image_digest(image);
+            let hash = get_image_digest(&docker, image).await;
             pre_pull_hashes.insert(image.clone(), hash);
         }
 
         // Pull images
-        pull_images(&images)?;
+        pull_images(&docker, &images).await?;
 
         // Compare states
         let mut updated = false;
         for image in &images {
             let old_hash = pre_pull_hashes.get(image).unwrap_or(&None);
-            let new_hash = get_image_digest(image);
+            let new_hash = get_image_digest(&docker, image).await;
 
             match (old_hash, &new_hash) {
                 (Some(old), Some(new)) if old != new => {
@@ -402,29 +417,18 @@ pub fn run_list(ctx: &Context) -> Result<()> {
     Ok(())
 }
 
-pub fn run_ps(_ctx: &Context, _services: &[String]) -> Result<()> {
-    let mut cmd = Command::new("docker");
-    cmd.args(["ps", "--all", "--format", "{{json .}}"]);
+pub async fn run_ps(ctx: &Context, _services: &[String]) -> Result<()> {
+    let docker = connect_docker(ctx)?;
 
-    let output = cmd.output().context("Failed to run docker ps")?;
-    if !output.status.success() {
-        bail!(
-            "Error running docker ps: {}",
-            String::from_utf8_lossy(&output.stderr)
-        );
-    }
+    let options = ListContainersOptions {
+        all: true,
+        ..Default::default()
+    };
 
-    let stdout = String::from_utf8_lossy(&output.stdout);
-    let mut containers = Vec::new();
-
-    for line in stdout.lines() {
-        if line.trim().is_empty() {
-            continue;
-        }
-        let c: DockerContainer =
-            serde_json::from_str(line).context("Failed to parse docker ps JSON output")?;
-        containers.push(c);
-    }
+    let containers = docker
+        .list_containers(Some(options))
+        .await
+        .context("Failed to list containers via Docker API")?;
 
     if containers.is_empty() {
         println!("No containers found.");
@@ -432,7 +436,16 @@ pub fn run_ps(_ctx: &Context, _services: &[String]) -> Result<()> {
     }
 
     // Headers: emojis at the end to avoid padding issues
-    let headers = ["ID", "NAME", "IMAGE/TAG", "CREATED", "UPTIME", "PORTS", "STATE", "HEALTH"];
+    let headers = [
+        "ID",
+        "NAME",
+        "IMAGE/TAG",
+        "CREATED",
+        "UPTIME",
+        "PORTS",
+        "STATE",
+        "HEALTH",
+    ];
 
     // Pre-process data
     struct RowData {
@@ -456,37 +469,75 @@ pub fn run_ps(_ctx: &Context, _services: &[String]) -> Result<()> {
     let mut w_ports = headers[5].len();
 
     for c in containers {
-        // Handle "2026-01-23 22:30:00 +0700 WIB" -> "2026-01-23 22:30:00"
-        let created = if c.created_at.contains(' ') {
-            let parts: Vec<&str> = c.created_at.split_whitespace().collect();
-            if parts.len() >= 2 {
-                format!("{} {}", parts[0], parts[1])
-            } else {
-                c.created_at
-            }
-        } else {
-            c.created_at
-                .replace('T', " ")
-                .split('+')
-                .next()
-                .unwrap_or(&c.created_at)
-                .to_string()
-        };
+        let id = c.id.as_deref().unwrap_or("<unknown>");
+        // Take first 12 chars of container ID for display
+        let id_short = if id.len() > 12 { &id[..12] } else { id };
 
-        let (uptime, health) = parse_status_uptime_health(&c.status);
-        let state = state_to_emoji(&c.state).to_string();
+        // Names in Docker API come as "/container-name", strip the leading slash
+        let name = c
+            .names
+            .as_ref()
+            .and_then(|n| n.first())
+            .map(|s| s.strip_prefix('/').unwrap_or(s))
+            .unwrap_or("<unknown>");
 
-        // Split ports by ", "
-        let ports: Vec<String> = if c.ports.is_empty() {
-            vec![]
-        } else {
-            c.ports.split(", ").map(|s| s.to_string()).collect()
-        };
+        let image = c.image.as_deref().unwrap_or("<unknown>");
+
+        // Convert Unix timestamp to readable format
+        let created = c
+            .created
+            .map(|ts: i64| {
+                DateTime::from_timestamp(ts, 0)
+                    .map(|dt: DateTime<chrono::Utc>| dt.format("%Y-%m-%d %H:%M:%S").to_string())
+                    .unwrap_or_else(|| ts.to_string())
+            })
+            .unwrap_or_else(|| "-".to_string());
+
+        let status = c.status.as_deref().unwrap_or("");
+        let (uptime, health) = parse_status_uptime_health(status);
+
+        let state_str = c
+            .state
+            .as_ref()
+            .map(|s| format!("{:?}", s).to_lowercase())
+            .unwrap_or_else(|| "unknown".to_string());
+        let state = state_to_emoji(&state_str).to_string();
+
+        // Format ports from API structure
+        let ports: Vec<String> = c
+            .ports
+            .as_ref()
+            .map(|ports| {
+                ports
+                    .iter()
+                    .map(|p| {
+                        let private = p.private_port;
+                        let port_type = p.typ.as_ref().map(|t| format!("{:?}", t).to_lowercase());
+                        match (&p.ip, p.public_port) {
+                            (Some(ip), Some(public)) => format!(
+                                "{}:{}->{}/{}",
+                                ip,
+                                public,
+                                private,
+                                port_type.as_deref().unwrap_or("tcp")
+                            ),
+                            (None, Some(public)) => format!(
+                                "{}->{}/{}",
+                                public,
+                                private,
+                                port_type.as_deref().unwrap_or("tcp")
+                            ),
+                            _ => format!("{}/{}", private, port_type.as_deref().unwrap_or("tcp")),
+                        }
+                    })
+                    .collect()
+            })
+            .unwrap_or_default();
 
         // Update widths
-        w_id = w_id.max(c.id.len());
-        w_name = w_name.max(c.names.len());
-        w_image = w_image.max(c.image.len());
+        w_id = w_id.max(id_short.len());
+        w_name = w_name.max(name.len());
+        w_image = w_image.max(image.len());
         w_created = w_created.max(created.len());
         w_uptime = w_uptime.max(uptime.len());
         if let Some(first_port) = ports.first() {
@@ -494,9 +545,9 @@ pub fn run_ps(_ctx: &Context, _services: &[String]) -> Result<()> {
         }
 
         data.push(RowData {
-            id: c.id,
-            name: c.names,
-            image: c.image,
+            id: id_short.to_string(),
+            name: name.to_string(),
+            image: image.to_string(),
             created,
             uptime,
             ports,
@@ -506,8 +557,10 @@ pub fn run_ps(_ctx: &Context, _services: &[String]) -> Result<()> {
     }
 
     // Print header
-    print!("{:<w_id$}  {:<w_name$}  {:<w_image$}  {:<w_created$}  {:<w_uptime$}  {:<w_ports$}  STATE  HEALTH",
-        headers[0], headers[1], headers[2], headers[3], headers[4], headers[5]);
+    print!(
+        "{:<w_id$}  {:<w_name$}  {:<w_image$}  {:<w_created$}  {:<w_uptime$}  {:<w_ports$}  STATE  HEALTH",
+        headers[0], headers[1], headers[2], headers[3], headers[4], headers[5]
+    );
     println!();
 
     // Calculate indent for port continuation lines
@@ -517,8 +570,10 @@ pub fn run_ps(_ctx: &Context, _services: &[String]) -> Result<()> {
     for row in data {
         let first_port = row.ports.first().map(|s| s.as_str()).unwrap_or("");
 
-        print!("{:<w_id$}  {:<w_name$}  {:<w_image$}  {:<w_created$}  {:<w_uptime$}  {:<w_ports$}  {}     {}",
-            row.id, row.name, row.image, row.created, row.uptime, first_port, row.state, row.health);
+        print!(
+            "{:<w_id$}  {:<w_name$}  {:<w_image$}  {:<w_created$}  {:<w_uptime$}  {:<w_ports$}  {}     {}",
+            row.id, row.name, row.image, row.created, row.uptime, first_port, row.state, row.health
+        );
         println!();
 
         // Print remaining ports on continuation lines
@@ -690,7 +745,7 @@ fn get_images_for_project(project_dir: &Path) -> Result<Vec<String>> {
     let content = fs::read_to_string(&compose_file)
         .with_context(|| format!("Failed to read {:?}", compose_file))?;
 
-    let compose: DockerCompose = serde_yaml::from_str(&content)
+    let compose: DockerCompose = serde_yaml_ng::from_str(&content)
         .with_context(|| format!("Failed to parse {:?}", compose_file))?;
 
     let mut images = Vec::new();
@@ -706,41 +761,78 @@ fn get_images_for_project(project_dir: &Path) -> Result<Vec<String>> {
     Ok(images)
 }
 
-/// Get the digest/ID of a local docker image
-fn get_image_digest(image: &str) -> Option<String> {
-    let output = Command::new("docker")
-        .arg("inspect")
-        .arg("--format={{.Id}}")
-        .arg(image)
-        .stdout(Stdio::piped())
-        .stderr(Stdio::null())
-        .output()
-        .ok()?;
-
-    if output.status.success() {
-        let s = String::from_utf8_lossy(&output.stdout).trim().to_string();
-        if s.is_empty() { None } else { Some(s) }
-    } else {
-        None
-    }
+/// Get the digest/ID of a local docker image using Bollard
+async fn get_image_digest(docker: &Docker, image: &str) -> Option<String> {
+    docker
+        .inspect_image(image)
+        .await
+        .ok()
+        .and_then(|info| info.id)
 }
 
-/// Pull docker images
-fn pull_images(images: &[String]) -> Result<()> {
+/// Pull docker images using Bollard with progress output
+async fn pull_images(docker: &Docker, images: &[String]) -> Result<()> {
     for image in images {
         println!("Pulling {}...", image);
-        let status = Command::new("docker")
-            .arg("pull")
-            .arg(image)
-            .stdout(Stdio::inherit())
-            .stderr(Stdio::inherit())
-            .status()
-            .with_context(|| format!("Failed to run docker pull {}", image))?;
 
-        if !status.success() {
-            eprintln!("{} Failed to pull {}", "Warning:".yellow(), image);
+        // Parse image name and tag
+        let (repo, tag) = if let Some(idx) = image.rfind(':') {
+            // Check if the colon is part of a port (e.g., localhost:5000/image)
+            let after_colon = &image[idx + 1..];
+            if after_colon.contains('/') {
+                // This is a port, not a tag
+                (image.as_str(), "latest")
+            } else {
+                (&image[..idx], after_colon)
+            }
+        } else {
+            (image.as_str(), "latest")
+        };
+
+        let options = CreateImageOptions {
+            from_image: Some(repo.to_string()),
+            tag: Some(tag.to_string()),
+            ..Default::default()
+        };
+
+        let mut stream = docker.create_image(Some(options), None, None);
+        let mut last_status = String::new();
+
+        while let Some(result) = stream.next().await {
+            match result {
+                Ok(info) => {
+                    // Show progress info
+                    if let Some(status) = &info.status {
+                        // Build progress string from progress_detail if available
+                        let progress_str = info
+                            .progress_detail
+                            .as_ref()
+                            .and_then(|pd| match (pd.current, pd.total) {
+                                (Some(current), Some(total)) if total > 0 => {
+                                    Some(format!(" [{}/{}]", current, total))
+                                }
+                                _ => None,
+                            })
+                            .unwrap_or_default();
+                        let id_str = info.id.as_deref().unwrap_or("");
+
+                        let current = format!("{}: {}{}", id_str, status, progress_str);
+                        if current != last_status {
+                            // Clear line and print new status
+                            print!("\r\x1b[K{}", current);
+                            let _ = io::stdout().flush();
+                            last_status = current;
+                        }
+                    }
+                }
+                Err(e) => {
+                    println!();
+                    eprintln!("{} Failed to pull {}: {}", "Warning:".yellow(), image, e);
+                    break;
+                }
+            }
         }
-        println!();
+        println!(); // New line after progress
     }
     Ok(())
 }
@@ -773,11 +865,7 @@ fn parse_status_uptime_health(status: &str) -> (String, String) {
     };
 
     // Extract uptime - remove health status in parentheses first
-    let status_without_health = status
-        .split('(')
-        .next()
-        .unwrap_or(status)
-        .trim();
+    let status_without_health = status.split('(').next().unwrap_or(status).trim();
 
     let uptime = if status_without_health.starts_with("Up ") {
         status_without_health
@@ -877,6 +965,7 @@ mod tests {
             systemctl_cmd: vec!["systemctl".to_string(), "--user".to_string()],
             compose_base: compose_base.to_path_buf(),
             env_file: PathBuf::from("/tmp/test-compose.env"),
+            docker_host: None,
         }
     }
 
@@ -1249,7 +1338,7 @@ mod tests {
         let mut file = NamedTempFile::new().unwrap();
         writeln!(file, "# This is a comment").unwrap();
         writeln!(file, "TAG=v1.0").unwrap();
-        writeln!(file, "").unwrap();
+        writeln!(file).unwrap();
         writeln!(file, "# Another comment").unwrap();
         writeln!(file, "USER=admin").unwrap();
 
@@ -1283,7 +1372,7 @@ services:
     image: postgres:14
 "#;
 
-        let compose: DockerCompose = serde_yaml::from_str(yaml).unwrap();
+        let compose: DockerCompose = serde_yaml_ng::from_str(yaml).unwrap();
         let services = compose.services.unwrap();
         assert_eq!(
             services.get("web").unwrap().image,
@@ -1306,7 +1395,7 @@ services:
     image: postgres:14
 "#;
 
-        let compose: DockerCompose = serde_yaml::from_str(yaml).unwrap();
+        let compose: DockerCompose = serde_yaml_ng::from_str(yaml).unwrap();
         let services = compose.services.unwrap();
         assert_eq!(services.get("app").unwrap().image, None);
         assert_eq!(

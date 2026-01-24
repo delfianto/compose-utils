@@ -294,6 +294,7 @@ mod tests {
                 systemctl_cmd: vec!["systemctl".to_string(), "--user".to_string()],
                 compose_base: self.base.clone(),
                 env_file: self.env_file(),
+                docker_host: None,
             }
         }
 

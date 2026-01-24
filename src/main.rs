@@ -86,7 +86,8 @@ enum Commands {
     Config(config::ConfigArgs),
 }
 
-fn main() -> Result<()> {
+#[tokio::main]
+async fn main() -> Result<()> {
     let cli = Cli::parse();
     let ctx = get_context()?;
 
@@ -94,13 +95,13 @@ fn main() -> Result<()> {
         Commands::Start { services } => manage::run_start(&ctx, &services),
         Commands::Stop { services } => manage::run_stop(&ctx, &services),
         Commands::Restart { services } => manage::run_restart(&ctx, &services),
-        Commands::Update { services } => manage::run_update(&ctx, &services),
-        Commands::Pull { services } => manage::run_pull(&ctx, &services),
+        Commands::Update { services } => manage::run_update(&ctx, &services).await,
+        Commands::Pull { services } => manage::run_pull(&ctx, &services).await,
         Commands::Status { services } => manage::run_systemctl(&ctx, "status", &services, false),
         Commands::Enable { services } => manage::run_enable(&ctx, &services),
         Commands::Disable { services } => manage::run_disable(&ctx, &services),
         Commands::List => manage::run_list(&ctx),
-        Commands::Ps { services } => manage::run_ps(&ctx, &services),
+        Commands::Ps { services } => manage::run_ps(&ctx, &services).await,
         Commands::Logs {
             service,
             follow,

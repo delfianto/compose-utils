@@ -15,6 +15,7 @@ pub struct Context {
     pub systemctl_cmd: Vec<String>,
     pub compose_base: PathBuf,
     pub env_file: PathBuf,
+    pub docker_host: Option<String>,
 }
 
 pub fn get_context() -> Result<Context> {
@@ -31,12 +32,15 @@ pub fn get_context() -> Result<Context> {
             .map(PathBuf::from)
             .unwrap_or_else(|| PathBuf::from(constants::ROOT_COMPOSE_BASE));
 
+        let docker_host = config.get("DOCKER_HOST").cloned();
+
         Ok(Context {
             is_root: true,
             systemd_dir: PathBuf::from(constants::ROOT_SYSTEMD_DIR),
             systemctl_cmd: vec![constants::SYSTEMCTL_CMD.to_string()],
             compose_base,
             env_file,
+            docker_host,
         })
     } else {
         let base_dirs = BaseDirs::new().context("Could not determine user home directory")?;
@@ -61,12 +65,15 @@ pub fn get_context() -> Result<Context> {
             .map(PathBuf::from)
             .unwrap_or_else(|| base_dirs.home_dir().join(constants::USER_COMPOSE_BASE_NAME));
 
+        let docker_host = config.get("DOCKER_HOST").cloned();
+
         Ok(Context {
             is_root: false,
             systemd_dir: xdg_config.join(constants::USER_SYSTEMD_DIR_REL),
             systemctl_cmd: vec![constants::SYSTEMCTL_CMD.to_string(), "--user".to_string()],
             compose_base,
             env_file,
+            docker_host,
         })
     }
 }
