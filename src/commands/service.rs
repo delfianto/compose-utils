@@ -7,7 +7,6 @@ use crate::docker::images::pull_image_with_progress;
 use crate::systemd::client::SystemdClient;
 use crate::systemd::discovery::{resolve_service, resolve_services};
 use crate::systemd::journal::{JournalReader, LogEntry};
-use crate::systemd::manager::ensure_symlink;
 use crate::systemd::service::{get_bare_name, get_compose_dir, normalize_unit_name};
 use anyhow::Result;
 
@@ -46,7 +45,6 @@ pub async fn run_start(ctx: &Context, names: &[String], deps_path: Option<String
 
     for name in services {
         let bare = get_bare_name(&name);
-        ensure_symlink(ctx, bare)?;
 
         let compose_dir = get_compose_dir(ctx, bare);
         let unit_name = normalize_unit_name(ctx, bare);
@@ -107,7 +105,6 @@ pub async fn run_restart(ctx: &Context, names: &[String]) -> Result<()> {
 
     for name in services {
         let bare = get_bare_name(&name);
-        ensure_symlink(ctx, bare)?;
 
         let compose_dir = get_compose_dir(ctx, bare);
         let unit_name = normalize_unit_name(ctx, bare);
@@ -254,7 +251,6 @@ pub async fn run_enable(ctx: &Context, names: &[String], deps_path: Option<Strin
 
     for name in &services {
         let bare = get_bare_name(name);
-        ensure_symlink(ctx, bare)?;
 
         let unit_name = normalize_unit_name(ctx, bare);
         println!("Enabling {}...", unit_name);
@@ -274,7 +270,6 @@ pub async fn run_disable(ctx: &Context, names: &[String]) -> Result<()> {
 
         println!("Disabling {}...", unit_name);
         crate::systemd::manager::disable_unit(ctx, &unit_name)?;
-        crate::systemd::manager::remove_symlink(ctx, bare)?;
     }
 
     Ok(())
