@@ -431,65 +431,100 @@ pub fn run_ps(_ctx: &Context, _services: &[String]) -> Result<()> {
         return Ok(());
     }
 
-    let headers = vec![
-        "ID",
-        "NAME",
-        "IMAGE/TAG",
-        "CREATED",
-        "STATE",
-        "STATUS",
-        "PORTS",
-    ];
-    let mut widths = headers.iter().map(|h| h.len()).collect::<Vec<_>>();
-    let mut data = Vec::new();
+    // Headers: emojis at the end to avoid padding issues
+    let headers = ["ID", "NAME", "IMAGE/TAG", "CREATED", "UPTIME", "PORTS", "STATE", "HEALTH"];
+
+    // Pre-process data
+    struct RowData {
+        id: String,
+        name: String,
+        image: String,
+        created: String,
+        uptime: String,
+        ports: Vec<String>,
+        state: String,
+        health: String,
+    }
+    let mut data: Vec<RowData> = Vec::new();
+
+    // Track max widths for non-emoji columns
+    let mut w_id = headers[0].len();
+    let mut w_name = headers[1].len();
+    let mut w_image = headers[2].len();
+    let mut w_created = headers[3].len();
+    let mut w_uptime = headers[4].len();
+    let mut w_ports = headers[5].len();
 
     for c in containers {
-        // Handle "2026-01-23 22:30:00 +0700 WIB" or "2026-01-23 22:30:00 +0700" or already ISO
-        let iso_created = if c.created_at.contains(' ') {
+        // Handle "2026-01-23 22:30:00 +0700 WIB" -> "2026-01-23 22:30:00"
+        let created = if c.created_at.contains(' ') {
             let parts: Vec<&str> = c.created_at.split_whitespace().collect();
-            if parts.len() >= 3 {
-                // "2026-01-23", "22:30:00", "+0700" -> "2026-01-23T22:30:00+0700"
-                format!("{}T{}{}", parts[0], parts[1], parts[2])
-            } else if parts.len() == 2 {
-                // "2026-01-23", "22:30:00" -> "2026-01-23T22:30:00"
-                format!("{}T{}", parts[0], parts[1])
+            if parts.len() >= 2 {
+                format!("{} {}", parts[0], parts[1])
             } else {
-                c.created_at.replace(' ', "T")
+                c.created_at
             }
         } else {
             c.created_at
+                .replace('T', " ")
+                .split('+')
+                .next()
+                .unwrap_or(&c.created_at)
+                .to_string()
         };
 
-        let row = vec![
-            c.id,
-            c.names,
-            c.image,
-            iso_created,
-            c.state,
-            c.status,
-            c.ports,
-        ];
+        let (uptime, health) = parse_status_uptime_health(&c.status);
+        let state = state_to_emoji(&c.state).to_string();
 
-        for (i, val) in row.iter().enumerate() {
-            if val.len() > widths[i] {
-                widths[i] = val.len();
-            }
+        // Split ports by ", "
+        let ports: Vec<String> = if c.ports.is_empty() {
+            vec![]
+        } else {
+            c.ports.split(", ").map(|s| s.to_string()).collect()
+        };
+
+        // Update widths
+        w_id = w_id.max(c.id.len());
+        w_name = w_name.max(c.names.len());
+        w_image = w_image.max(c.image.len());
+        w_created = w_created.max(created.len());
+        w_uptime = w_uptime.max(uptime.len());
+        if let Some(first_port) = ports.first() {
+            w_ports = w_ports.max(first_port.len());
         }
-        data.push(row);
+
+        data.push(RowData {
+            id: c.id,
+            name: c.names,
+            image: c.image,
+            created,
+            uptime,
+            ports,
+            state,
+            health,
+        });
     }
 
     // Print header
-    for (i, h) in headers.iter().enumerate() {
-        print!("{:<width$}  ", h, width = widths[i]);
-    }
+    print!("{:<w_id$}  {:<w_name$}  {:<w_image$}  {:<w_created$}  {:<w_uptime$}  {:<w_ports$}  STATE  HEALTH",
+        headers[0], headers[1], headers[2], headers[3], headers[4], headers[5]);
     println!();
+
+    // Calculate indent for port continuation lines
+    let port_indent = w_id + 2 + w_name + 2 + w_image + 2 + w_created + 2 + w_uptime + 2;
 
     // Print rows
     for row in data {
-        for (i, val) in row.iter().enumerate() {
-            print!("{:<width$}  ", val, width = widths[i]);
-        }
+        let first_port = row.ports.first().map(|s| s.as_str()).unwrap_or("");
+
+        print!("{:<w_id$}  {:<w_name$}  {:<w_image$}  {:<w_created$}  {:<w_uptime$}  {:<w_ports$}  {}     {}",
+            row.id, row.name, row.image, row.created, row.uptime, first_port, row.state, row.health);
         println!();
+
+        // Print remaining ports on continuation lines
+        for port in row.ports.iter().skip(1) {
+            println!("{:port_indent$}{}", "", port);
+        }
     }
 
     Ok(())
@@ -716,6 +751,57 @@ fn shorten_hash(hash: &str) -> String {
         hash[..12].to_string()
     } else {
         hash.to_string()
+    }
+}
+
+/// Parse docker status to extract uptime and health
+/// Examples: "Up 49 seconds" -> ("49 seconds", "-")
+///           "Up 49 seconds (healthy)" -> ("49 seconds", "✓")
+///           "Up About an hour" -> ("About an hour", "-")
+///           "Exited (0) 2 hours ago" -> ("-", "-")
+fn parse_status_uptime_health(status: &str) -> (String, String) {
+    // Extract health if present (e.g., "(healthy)", "(unhealthy)")
+    let health = if status.contains("(healthy)") {
+        "💚".to_string()
+    } else if status.contains("(unhealthy)") {
+        "💔".to_string()
+    } else if status.contains("(health:") {
+        // Handle "(health: starting)" etc.
+        "💛".to_string()
+    } else {
+        "🤍".to_string()
+    };
+
+    // Extract uptime - remove health status in parentheses first
+    let status_without_health = status
+        .split('(')
+        .next()
+        .unwrap_or(status)
+        .trim();
+
+    let uptime = if status_without_health.starts_with("Up ") {
+        status_without_health
+            .strip_prefix("Up ")
+            .unwrap_or("-")
+            .to_string()
+    } else {
+        "-".to_string()
+    };
+
+    (uptime, health)
+}
+
+/// Map docker container state to emoji
+fn state_to_emoji(state: &str) -> &'static str {
+    match state.to_lowercase().as_str() {
+        "created" => "🏗️",
+        "running" => "🟢",
+        "restarting" => "🔄",
+        "paused" => "⏸️",
+        "exited" => "🛑",
+        "removing" => "🚮",
+        "dead" => "💀",
+        _ => "❓",
     }
 }
 
@@ -1310,5 +1396,70 @@ services:
         let temp_dir = TempDir::new().unwrap();
         let result = find_compose_file(temp_dir.path());
         assert!(result.is_none());
+    }
+
+    #[test]
+    fn test_parse_status_uptime_health_simple() {
+        let (uptime, health) = parse_status_uptime_health("Up 49 seconds");
+        assert_eq!(uptime, "49 seconds");
+        assert_eq!(health, "🤍");
+    }
+
+    #[test]
+    fn test_parse_status_uptime_health_with_healthy() {
+        let (uptime, health) = parse_status_uptime_health("Up 49 seconds (healthy)");
+        assert_eq!(uptime, "49 seconds");
+        assert_eq!(health, "💚");
+    }
+
+    #[test]
+    fn test_parse_status_uptime_health_about_hour() {
+        let (uptime, health) = parse_status_uptime_health("Up About an hour");
+        assert_eq!(uptime, "About an hour");
+        assert_eq!(health, "🤍");
+    }
+
+    #[test]
+    fn test_parse_status_uptime_health_unhealthy() {
+        let (uptime, health) = parse_status_uptime_health("Up 2 minutes (unhealthy)");
+        assert_eq!(uptime, "2 minutes");
+        assert_eq!(health, "💔");
+    }
+
+    #[test]
+    fn test_parse_status_uptime_health_exited() {
+        let (uptime, health) = parse_status_uptime_health("Exited (0) 2 hours ago");
+        assert_eq!(uptime, "-");
+        assert_eq!(health, "🤍");
+    }
+
+    #[test]
+    fn test_state_to_emoji_running() {
+        assert_eq!(state_to_emoji("running"), "🟢");
+    }
+
+    #[test]
+    fn test_state_to_emoji_exited() {
+        assert_eq!(state_to_emoji("exited"), "🛑");
+    }
+
+    #[test]
+    fn test_state_to_emoji_created() {
+        assert_eq!(state_to_emoji("created"), "🏗️");
+    }
+
+    #[test]
+    fn test_state_to_emoji_paused() {
+        assert_eq!(state_to_emoji("paused"), "⏸️");
+    }
+
+    #[test]
+    fn test_state_to_emoji_dead() {
+        assert_eq!(state_to_emoji("dead"), "💀");
+    }
+
+    #[test]
+    fn test_state_to_emoji_unknown() {
+        assert_eq!(state_to_emoji("unknown"), "❓");
     }
 }
