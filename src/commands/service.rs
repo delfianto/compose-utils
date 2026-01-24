@@ -13,10 +13,34 @@ use crate::systemd::types::JobResult;
 use anyhow::{bail, Result};
 
 /// Executes the `start` (or `up`) command with smart image pulling.
-pub async fn run_start(ctx: &Context, names: &[String]) -> Result<()> {
+pub async fn run_start(ctx: &Context, names: &[String], deps_path: Option<String>) -> Result<()> {
     let systemd = SystemdClient::new(!ctx.is_root).await?;
     let docker = connect_docker(ctx)?;
     let services = resolve_services(ctx, names)?;
+
+    if let Some(path) = deps_path {
+        let path = std::path::Path::new(&path);
+        println!("Loading dependencies from {}...", path.display());
+        let config = crate::compose::dependencies::load_dependencies(path)?;
+
+        let mut updated = false;
+        // Apply dependencies for all services defined in the file
+        for (service_name, service_config) in &config.services {
+            if crate::systemd::discovery::resolve_service(ctx, service_name).is_ok() {
+                crate::commands::deps::apply_dependencies(ctx, service_name, service_config)?;
+                updated = true;
+            } else {
+                println!(
+                    "Warning: Service '{}' defined in dependency file not found in projects.",
+                    service_name
+                );
+            }
+        }
+
+        if updated {
+            systemd.reload_daemon().await?;
+        }
+    }
 
     for name in services {
         let bare = get_bare_name(&name);
@@ -24,8 +48,6 @@ pub async fn run_start(ctx: &Context, names: &[String]) -> Result<()> {
 
         let compose_dir = get_compose_dir(ctx, bare);
         let unit_name = name_to_service(bare);
-
-        // 1. Check for required images
         let images = get_required_images(&compose_dir)?;
 
         if !images.is_empty() {
@@ -41,7 +63,6 @@ pub async fn run_start(ctx: &Context, names: &[String]) -> Result<()> {
                 }
             }
 
-            // 2. Pull missing images with progress
             if !missing.is_empty() {
                 println!();
                 for image in &missing {
@@ -51,14 +72,11 @@ pub async fn run_start(ctx: &Context, names: &[String]) -> Result<()> {
             }
         }
 
-        // 3. Start via D-Bus
         println!("Starting {}...", unit_name);
         let job_id = systemd.start_unit(&unit_name).await?;
 
-        // 4. Wait for completion
         let result = systemd.wait_for_job(job_id).await?;
 
-        // 5. Report result
         match result {
             JobResult::Done => {
                 let state = systemd.get_unit_state(&unit_name).await?;
@@ -185,13 +203,11 @@ pub async fn run_logs(
     let n = lines.unwrap_or(100);
 
     if follow {
-        // Show history first
         let entries = reader.logs_for_unit(&unit_name, n)?;
         for entry in entries {
             print_entry(&entry);
         }
 
-        // Then follow
         reader.follow_unit(&unit_name, |entry| {
             print_entry(entry);
             true
@@ -257,9 +273,32 @@ fn print_entry(entry: &LogEntry) {
 }
 
 /// Executes the `enable` command.
-pub async fn run_enable(ctx: &Context, names: &[String]) -> Result<()> {
+pub async fn run_enable(ctx: &Context, names: &[String], deps_path: Option<String>) -> Result<()> {
     let systemd = SystemdClient::new(!ctx.is_root).await?;
     let services = resolve_services(ctx, names)?;
+
+    if let Some(path) = deps_path {
+        let path = std::path::Path::new(&path);
+        println!("Loading dependencies from {}...", path.display());
+        let config = crate::compose::dependencies::load_dependencies(path)?;
+
+        let mut updated = false;
+        for (service_name, service_config) in &config.services {
+            if crate::systemd::discovery::resolve_service(ctx, service_name).is_ok() {
+                crate::commands::deps::apply_dependencies(ctx, service_name, service_config)?;
+                updated = true;
+            } else {
+                println!(
+                    "Warning: Service '{}' defined in dependency file not found in projects.",
+                    service_name
+                );
+            }
+        }
+
+        if updated {
+            systemd.reload_daemon().await?;
+        }
+    }
 
     for name in &services {
         let bare = get_bare_name(name);

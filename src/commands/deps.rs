@@ -176,6 +176,59 @@ async fn add_deps(
     Ok(())
 }
 
+/// Applies the dependency configuration to a service.
+///
+/// This updates the systemd override file to match the provided configuration.
+/// Existing dependencies not specified in the config are preserved, unless
+/// there is a conflict (which currently shouldn't happen as we just append).
+/// Actually, for the "apply" semantics from a file, we might want to ensure
+/// the file matches the config. But for now, let's implement it as ensuring
+/// these dependencies exist.
+pub fn apply_dependencies(
+    ctx: &Context,
+    service: &str,
+    config: &crate::compose::dependencies::ServiceConfig,
+) -> Result<()> {
+    let override_dir = get_override_dir(ctx, service);
+    let override_file = get_override_file(ctx, service);
+
+    fs::create_dir_all(&override_dir)?;
+
+    // We start with existing deps to preserve anything manually added?
+    // Or do we start fresh? The user request implies defining startup order.
+    // Let's assume we read existing just to be safe, but we might want to
+    // consider a "clean" application in the future.
+    let mut current_deps = parse_override_file(&override_file)?;
+
+    if let Some(requires) = &config.requires {
+        update_deps_list(&mut current_deps, "Requires", requires);
+    }
+
+    if let Some(wants) = &config.wants {
+        update_deps_list(&mut current_deps, "Wants", wants);
+    }
+
+    write_override_file(&override_file, &current_deps)?;
+    Ok(())
+}
+
+fn update_deps_list(deps: &mut SystemdDeps, key: &str, items: &[String]) {
+    for item in items {
+        let name = get_compose_service_name(item);
+
+        let list = deps.entry(key.to_string()).or_default();
+        if !list.contains(&name) {
+            list.push(name.clone());
+        }
+
+        // Always add to After as well
+        let after_list = deps.entry("After".to_string()).or_default();
+        if !after_list.contains(&name) {
+            after_list.push(name);
+        }
+    }
+}
+
 /// Logic for the `remove` action.
 async fn remove_deps(ctx: &Context, service: &str, deps_to_remove: &[String]) -> Result<()> {
     let override_file = get_override_file(ctx, service);
@@ -290,5 +343,34 @@ mod tests {
         let content = fs::read_to_string(&file).unwrap();
         assert!(content.contains("[Unit]"));
         assert!(content.contains("Wants=compose@db.service"));
+    }
+
+    #[test]
+    fn test_apply_dependencies_creates_file() {
+        let dir = tempdir().unwrap();
+        let ctx = Context {
+            is_root: false,
+            systemd_dir: dir.path().to_path_buf(),
+            compose_base: dir.path().join("compose"),
+            env_file: dir.path().join("env"),
+            docker_host: None,
+        };
+
+        let config = crate::compose::dependencies::ServiceConfig {
+            requires: Some(vec!["pgvector".to_string()]),
+            wants: Some(vec!["ollama".to_string()]),
+        };
+
+        apply_dependencies(&ctx, "myapp", &config).unwrap();
+
+        let override_file = get_override_file(&ctx, "myapp");
+        assert!(override_file.exists());
+
+        let content = fs::read_to_string(override_file).unwrap();
+        assert!(content.contains("Requires=compose@pgvector.service"));
+        assert!(content.contains("Wants=compose@ollama.service"));
+        // Check implicit After
+        assert!(content.contains("After=compose@pgvector.service"));
+        assert!(content.contains("After=compose@ollama.service"));
     }
 }

@@ -33,16 +33,19 @@ Commands can be run from anywhere. If run inside a directory containing a `compo
 
 ### Service Management
 
-| Command  | Alias     | Description                                       |
-| :------- | :-------- | :------------------------------------------------ |
-| `up`     | `start`   | Start services and show immediate systemd status. |
-| `down`   | `stop`    | Stop services and perform cleanup.                |
-| `reup`   | `restart` | Restart services.                                 |
-| `pull`   | `update`  | Pull latest images and restart.                   |
-| `status` |           | Show current systemd unit status.                 |
-| `ls`     | `list`    | List all managed services under `COMPOSE_BASE`.   |
-| `ps`     |           | Show all system containers with ISO timestamps.   |
-| `logs`   |           | View last 100 lines of logs (scrolls to end).     |
+| Command   | Alias     | Description                                         |
+| :-------- | :-------- | :-------------------------------------------------- |
+| `up`      | `start`   | Start services and show immediate systemd status.   |
+| `down`    | `stop`    | Stop services and perform cleanup.                  |
+| `reup`    | `restart` | Restart services.                                   |
+| `update`  |           | Pull latest images and restart if updated.          |
+| `pull`    |           | Download images without restarting.                 |
+| `status`  |           | Show current systemd unit status.                   |
+| `enable`  |           | Enable services to start on boot.                   |
+| `disable` |           | Disable services from starting on boot.             |
+| `ls`      | `list`    | List all managed services under `COMPOSE_BASE`.     |
+| `ps`      |           | Show all system containers with ISO timestamps.     |
+| `logs`    |           | View last 100 lines of logs (scrolls to end).       |
 
 ### Examples
 
@@ -56,13 +59,16 @@ compose logs genai/ollama -f
 # Check system containers (Global view)
 compose ps
 
-# Update a project's images
+# Update images and restart project only if changes detected
+compose update genai/ollama
+
+# Just pull images
 compose pull genai/ollama
 ```
 
 ### Configuration
 
-Manage your `compose.env` settings (stored in `/etc/compose.env` or `~/.config/compose.env`):
+Manage your `compose.env` settings (stored in `/etc/compose.env` or `~/.config/docker/compose.env`):
 
 ```bash
 # View current configuration

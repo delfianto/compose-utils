@@ -35,6 +35,10 @@ enum Commands {
     Start {
         /// List of service names to start.
         services: Vec<String>,
+
+        /// Path to dependency configuration file.
+        #[arg(long, help = "Path to dependency configuration file")]
+        deps: Option<String>,
     },
     /// Stop services (systemctl stop).
     #[command(visible_alias = "down")]
@@ -67,6 +71,10 @@ enum Commands {
     Enable {
         /// List of service names to enable.
         services: Vec<String>,
+
+        /// Path to dependency configuration file.
+        #[arg(long, help = "Path to dependency configuration file")]
+        deps: Option<String>,
     },
     /// Disable services from starting on boot (systemctl disable).
     Disable {
@@ -108,13 +116,13 @@ async fn main() -> Result<()> {
     let ctx = get_context()?;
 
     match cli.command {
-        Commands::Start { services } => commands::run_start(&ctx, &services).await,
+        Commands::Start { services, deps } => commands::run_start(&ctx, &services, deps).await,
         Commands::Stop { services } => commands::run_stop(&ctx, &services).await,
         Commands::Restart { services } => commands::run_restart(&ctx, &services).await,
         Commands::Update { services } => commands::run_update(&ctx, &services).await,
         Commands::Pull { services } => commands::run_pull(&ctx, &services).await,
         Commands::Status { services } => commands::run_status(&ctx, &services).await,
-        Commands::Enable { services } => commands::run_enable(&ctx, &services).await,
+        Commands::Enable { services, deps } => commands::run_enable(&ctx, &services, deps).await,
         Commands::Disable { services } => commands::run_disable(&ctx, &services).await,
         Commands::List => commands::run_list(&ctx).await,
         Commands::Ps { services } => commands::ps::run_ps(&ctx, &services).await,
