@@ -36,10 +36,14 @@ enum Commands {
         /// Service names to restart
         services: Vec<String>,
     },
-    /// Pull images and restart services
-    #[command(visible_alias = "pull")]
+    /// Update services (pull images, restart only if changed)
     Update {
         /// Service names to update
+        services: Vec<String>,
+    },
+    /// Pull images for services without restarting
+    Pull {
+        /// Service names to pull images for
         services: Vec<String>,
     },
     /// Show service status
@@ -91,6 +95,7 @@ fn main() -> Result<()> {
         Commands::Stop { services } => manage::run_stop(&ctx, &services),
         Commands::Restart { services } => manage::run_restart(&ctx, &services),
         Commands::Update { services } => manage::run_update(&ctx, &services),
+        Commands::Pull { services } => manage::run_pull(&ctx, &services),
         Commands::Status { services } => manage::run_systemctl(&ctx, "status", &services, false),
         Commands::Enable { services } => manage::run_enable(&ctx, &services),
         Commands::Disable { services } => manage::run_disable(&ctx, &services),

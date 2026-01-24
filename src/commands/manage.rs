@@ -1,12 +1,15 @@
 use crate::constants::COMPOSE_FILES;
 use crate::core::Context;
-use anyhow::{bail, Context as _, Result};
+use anyhow::{Context as _, Result, bail};
+use colored::*;
+use regex::Regex;
 use serde::Deserialize;
+use std::collections::HashMap;
 use std::env;
 use std::fs;
 use std::os::unix::fs::symlink;
-use std::path::PathBuf;
-use std::process::Command;
+use std::path::{Path, PathBuf};
+use std::process::{Command, Stdio};
 
 #[derive(Deserialize, Debug)]
 #[serde(rename_all = "PascalCase")]
@@ -19,6 +22,17 @@ struct DockerContainer {
     state: String,
     status: String,
     ports: String,
+}
+
+/// Struct representing a subset of docker-compose.yml structure for image parsing
+#[derive(Deserialize, Debug)]
+struct DockerCompose {
+    services: Option<HashMap<String, ComposeService>>,
+}
+
+#[derive(Deserialize, Debug)]
+struct ComposeService {
+    image: Option<String>,
 }
 
 /// Convert project name to directory path.
@@ -269,7 +283,8 @@ pub fn run_restart(ctx: &Context, services: &[String]) -> Result<()> {
     run_systemctl(ctx, "restart", services, true)
 }
 
-pub fn run_update(ctx: &Context, services: &[String]) -> Result<()> {
+/// Pull images for services without restarting
+pub fn run_pull(ctx: &Context, services: &[String]) -> Result<()> {
     let services = resolve_services(ctx, services)?;
     validate_compose_dirs(ctx, &services)?;
 
@@ -277,27 +292,103 @@ pub fn run_update(ctx: &Context, services: &[String]) -> Result<()> {
         let bare = get_bare_name(service);
         let dir = get_compose_dir(ctx, bare);
 
-        println!("Pulling images for '{}'...", bare);
-        let mut pull_cmd = Command::new("docker");
-        pull_cmd.args(["compose", "pull"]);
-        pull_cmd.current_dir(&dir);
+        println!("{} Pulling images for '{}'...", ">>".blue(), bare);
 
-        println!("Running: {:?}", pull_cmd);
-        let status = pull_cmd
-            .status()
-            .context("Failed to run docker compose pull")?;
+        let images = get_images_for_project(&dir)?;
+        if images.is_empty() {
+            println!("No images defined in compose file for '{}'", bare);
+            continue;
+        }
 
-        if !status.success() {
-            bail!(
-                "Failed to pull images for '{}' (exit code: {})",
-                bare,
-                status.code().unwrap_or(1)
-            );
+        pull_images(&images)?;
+    }
+
+    println!("{} All images pulled successfully.", "OK".green());
+    Ok(())
+}
+
+/// Update services: pull images, detect changes, restart only if needed
+pub fn run_update(ctx: &Context, services: &[String]) -> Result<()> {
+    let services = resolve_services(ctx, services)?;
+    validate_compose_dirs(ctx, &services)?;
+
+    let mut services_to_restart = Vec::new();
+
+    for service in &services {
+        let bare = get_bare_name(service);
+        let dir = get_compose_dir(ctx, bare);
+
+        println!("{} Checking for updates: '{}'...", ">>".blue(), bare);
+
+        let images = get_images_for_project(&dir)?;
+        if images.is_empty() {
+            println!("No images defined in compose file for '{}'", bare);
+            continue;
+        }
+
+        // Capture current image states
+        let mut pre_pull_hashes = HashMap::new();
+        for image in &images {
+            let hash = get_image_digest(image);
+            pre_pull_hashes.insert(image.clone(), hash);
+        }
+
+        // Pull images
+        pull_images(&images)?;
+
+        // Compare states
+        let mut updated = false;
+        for image in &images {
+            let old_hash = pre_pull_hashes.get(image).unwrap_or(&None);
+            let new_hash = get_image_digest(image);
+
+            match (old_hash, &new_hash) {
+                (Some(old), Some(new)) if old != new => {
+                    println!(
+                        "{} Image updated: {} ({} -> {})",
+                        "+".green(),
+                        image,
+                        shorten_hash(old),
+                        shorten_hash(new)
+                    );
+                    updated = true;
+                }
+                (None, Some(new)) => {
+                    println!(
+                        "{} New image downloaded: {} ({})",
+                        "+".green(),
+                        image,
+                        shorten_hash(new)
+                    );
+                    updated = true;
+                }
+                _ => {
+                    // No change
+                }
+            }
+        }
+
+        if updated {
+            services_to_restart.push(service.clone());
+        } else {
+            println!("{} '{}' is already up to date.", "OK".green(), bare);
         }
     }
 
-    println!("\nRestarting services...");
-    run_systemctl(ctx, "restart", &services, false)
+    // Restart only services that had updates
+    if !services_to_restart.is_empty() {
+        println!("\nRestarting updated services...");
+        run_systemctl(ctx, "restart", &services_to_restart, false)?;
+        println!(
+            "{} Updated and restarted {} service(s).",
+            "OK".green(),
+            services_to_restart.len()
+        );
+    } else {
+        println!("\n{} All services are already up to date.", "OK".green());
+    }
+
+    Ok(())
 }
 
 pub fn run_list(ctx: &Context) -> Result<()> {
@@ -330,14 +421,14 @@ pub fn run_ps(_ctx: &Context, _services: &[String]) -> Result<()> {
         if line.trim().is_empty() {
             continue;
         }
-        let c: DockerContainer = 
+        let c: DockerContainer =
             serde_json::from_str(line).context("Failed to parse docker ps JSON output")?;
         containers.push(c);
     }
 
     if containers.is_empty() {
         println!("No containers found.");
-        return Ok(())
+        return Ok(());
     }
 
     let headers = vec![
@@ -369,7 +460,15 @@ pub fn run_ps(_ctx: &Context, _services: &[String]) -> Result<()> {
             c.created_at
         };
 
-        let row = vec![c.id, c.names, c.image, iso_created, c.state, c.status, c.ports];
+        let row = vec![
+            c.id,
+            c.names,
+            c.image,
+            iso_created,
+            c.state,
+            c.status,
+            c.ports,
+        ];
 
         for (i, val) in row.iter().enumerate() {
             if val.len() > widths[i] {
@@ -445,7 +544,7 @@ fn ensure_symlink(ctx: &Context, name: &str) -> Result<()> {
 
     // Only needed for nested directories
     if !dir_path.contains('/') {
-        return Ok(())
+        return Ok(());
     }
 
     let flat_name = bare.replace('/', "-");
@@ -458,7 +557,7 @@ fn ensure_symlink(ctx: &Context, name: &str) -> Result<()> {
         if current_target == target_path
             || current_target.as_path() == std::path::Path::new(&dir_path)
         {
-            return Ok(())
+            return Ok(());
         }
         // Wrong target, remove and recreate
         fs::remove_file(&symlink_path)?;
@@ -495,6 +594,129 @@ fn remove_symlink(ctx: &Context, name: &str) -> Result<()> {
         fs::remove_file(&symlink_path)?;
     }
     Ok(())
+}
+
+/// Load environment variables from a .env file
+fn load_env_file(path: &Path) -> Result<HashMap<String, String>> {
+    let content = fs::read_to_string(path)?;
+    let mut vars = HashMap::new();
+
+    for line in content.lines() {
+        let line = line.trim();
+        if line.is_empty() || line.starts_with('#') {
+            continue;
+        }
+        if let Some((key, value)) = line.split_once('=') {
+            // Remove potential quotes
+            let clean_value = value.trim_matches('"').trim_matches('\'');
+            vars.insert(key.trim().to_string(), clean_value.to_string());
+        }
+    }
+    Ok(vars)
+}
+
+/// Resolve environment variables in a string (e.g., ${TAG} or $TAG)
+fn resolve_env_vars(text: &str, vars: &HashMap<String, String>) -> String {
+    let re = Regex::new(r"\$\{?([a-zA-Z_][a-zA-Z0-9_]*)\}?").unwrap();
+    re.replace_all(text, |caps: &regex::Captures| {
+        let key = &caps[1];
+        vars.get(key)
+            .cloned()
+            .unwrap_or_else(|| caps[0].to_string())
+    })
+    .to_string()
+}
+
+/// Find compose file in a directory
+fn find_compose_file(dir: &Path) -> Option<PathBuf> {
+    for name in COMPOSE_FILES {
+        let path = dir.join(name);
+        if path.exists() {
+            return Some(path);
+        }
+    }
+    None
+}
+
+/// Get images from a compose project directory
+fn get_images_for_project(project_dir: &Path) -> Result<Vec<String>> {
+    let compose_file = find_compose_file(project_dir)
+        .ok_or_else(|| anyhow::anyhow!("No compose file found in {:?}", project_dir))?;
+    let env_file = project_dir.join(".env");
+
+    // Load .env if present
+    let env_vars = if env_file.exists() {
+        load_env_file(&env_file)?
+    } else {
+        HashMap::new()
+    };
+
+    // Parse compose file
+    let content = fs::read_to_string(&compose_file)
+        .with_context(|| format!("Failed to read {:?}", compose_file))?;
+
+    let compose: DockerCompose = serde_yaml::from_str(&content)
+        .with_context(|| format!("Failed to parse {:?}", compose_file))?;
+
+    let mut images = Vec::new();
+    if let Some(services) = compose.services {
+        for (_, service) in services {
+            if let Some(raw_image) = service.image {
+                let resolved = resolve_env_vars(&raw_image, &env_vars);
+                images.push(resolved);
+            }
+        }
+    }
+
+    Ok(images)
+}
+
+/// Get the digest/ID of a local docker image
+fn get_image_digest(image: &str) -> Option<String> {
+    let output = Command::new("docker")
+        .arg("inspect")
+        .arg("--format={{.Id}}")
+        .arg(image)
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .output()
+        .ok()?;
+
+    if output.status.success() {
+        let s = String::from_utf8_lossy(&output.stdout).trim().to_string();
+        if s.is_empty() { None } else { Some(s) }
+    } else {
+        None
+    }
+}
+
+/// Pull docker images
+fn pull_images(images: &[String]) -> Result<()> {
+    for image in images {
+        println!("Pulling {}...", image);
+        let status = Command::new("docker")
+            .arg("pull")
+            .arg(image)
+            .stdout(Stdio::inherit())
+            .stderr(Stdio::inherit())
+            .status()
+            .with_context(|| format!("Failed to run docker pull {}", image))?;
+
+        if !status.success() {
+            eprintln!("{} Failed to pull {}", "Warning:".yellow(), image);
+        }
+        println!();
+    }
+    Ok(())
+}
+
+/// Shorten a hash for display
+fn shorten_hash(hash: &str) -> String {
+    if hash.len() > 12 {
+        hash[..12].to_string()
+    } else {
+        hash.to_string()
+    }
 }
 
 pub fn run_enable(ctx: &Context, services: &[String]) -> Result<()> {
@@ -868,5 +1090,225 @@ mod tests {
 
         let dir = get_compose_dir(&ctx, bare);
         assert_eq!(dir, test_dir.path().join("my-project"));
+    }
+
+    // Tests for new image parsing and env var substitution
+
+    #[test]
+    fn test_resolve_env_vars_with_braces() {
+        let mut vars = HashMap::new();
+        vars.insert("TAG".to_string(), "v1.0".to_string());
+        vars.insert("REGISTRY".to_string(), "docker.io".to_string());
+
+        assert_eq!(resolve_env_vars("nginx:${TAG}", &vars), "nginx:v1.0");
+        assert_eq!(
+            resolve_env_vars("${REGISTRY}/app:latest", &vars),
+            "docker.io/app:latest"
+        );
+    }
+
+    #[test]
+    fn test_resolve_env_vars_without_braces() {
+        let mut vars = HashMap::new();
+        vars.insert("TAG".to_string(), "v1.0".to_string());
+
+        assert_eq!(resolve_env_vars("nginx:$TAG", &vars), "nginx:v1.0");
+    }
+
+    #[test]
+    fn test_resolve_env_vars_no_substitution() {
+        let vars = HashMap::new();
+        assert_eq!(resolve_env_vars("postgres:13", &vars), "postgres:13");
+    }
+
+    #[test]
+    fn test_resolve_env_vars_missing_var() {
+        let vars = HashMap::new();
+        // Missing variables should be kept as-is
+        assert_eq!(resolve_env_vars("app:${MISSING}", &vars), "app:${MISSING}");
+    }
+
+    #[test]
+    fn test_resolve_env_vars_multiple() {
+        let mut vars = HashMap::new();
+        vars.insert("REGISTRY".to_string(), "gcr.io".to_string());
+        vars.insert("PROJECT".to_string(), "myproject".to_string());
+        vars.insert("TAG".to_string(), "latest".to_string());
+
+        assert_eq!(
+            resolve_env_vars("${REGISTRY}/${PROJECT}/app:${TAG}", &vars),
+            "gcr.io/myproject/app:latest"
+        );
+    }
+
+    #[test]
+    fn test_load_env_file_basic() {
+        use std::io::Write;
+        use tempfile::NamedTempFile;
+
+        let mut file = NamedTempFile::new().unwrap();
+        writeln!(file, "TAG=v1.0").unwrap();
+        writeln!(file, "USER=admin").unwrap();
+
+        let vars = load_env_file(file.path()).unwrap();
+        assert_eq!(vars.get("TAG"), Some(&"v1.0".to_string()));
+        assert_eq!(vars.get("USER"), Some(&"admin".to_string()));
+    }
+
+    #[test]
+    fn test_load_env_file_with_comments() {
+        use std::io::Write;
+        use tempfile::NamedTempFile;
+
+        let mut file = NamedTempFile::new().unwrap();
+        writeln!(file, "# This is a comment").unwrap();
+        writeln!(file, "TAG=v1.0").unwrap();
+        writeln!(file, "").unwrap();
+        writeln!(file, "# Another comment").unwrap();
+        writeln!(file, "USER=admin").unwrap();
+
+        let vars = load_env_file(file.path()).unwrap();
+        assert_eq!(vars.len(), 2);
+        assert_eq!(vars.get("TAG"), Some(&"v1.0".to_string()));
+        assert_eq!(vars.get("USER"), Some(&"admin".to_string()));
+    }
+
+    #[test]
+    fn test_load_env_file_with_quotes() {
+        use std::io::Write;
+        use tempfile::NamedTempFile;
+
+        let mut file = NamedTempFile::new().unwrap();
+        writeln!(file, "DOUBLE=\"quoted value\"").unwrap();
+        writeln!(file, "SINGLE='single quoted'").unwrap();
+
+        let vars = load_env_file(file.path()).unwrap();
+        assert_eq!(vars.get("DOUBLE"), Some(&"quoted value".to_string()));
+        assert_eq!(vars.get("SINGLE"), Some(&"single quoted".to_string()));
+    }
+
+    #[test]
+    fn test_parse_compose_images() {
+        let yaml = r#"
+services:
+  web:
+    image: nginx:${TAG}
+  db:
+    image: postgres:14
+"#;
+
+        let compose: DockerCompose = serde_yaml::from_str(yaml).unwrap();
+        let services = compose.services.unwrap();
+        assert_eq!(
+            services.get("web").unwrap().image,
+            Some("nginx:${TAG}".to_string())
+        );
+        assert_eq!(
+            services.get("db").unwrap().image,
+            Some("postgres:14".to_string())
+        );
+    }
+
+    #[test]
+    fn test_parse_compose_no_image() {
+        // Some services might use build instead of image
+        let yaml = r#"
+services:
+  app:
+    build: .
+  db:
+    image: postgres:14
+"#;
+
+        let compose: DockerCompose = serde_yaml::from_str(yaml).unwrap();
+        let services = compose.services.unwrap();
+        assert_eq!(services.get("app").unwrap().image, None);
+        assert_eq!(
+            services.get("db").unwrap().image,
+            Some("postgres:14".to_string())
+        );
+    }
+
+    #[test]
+    fn test_get_images_for_project() {
+        use tempfile::TempDir;
+
+        let temp_dir = TempDir::new().unwrap();
+        let project_dir = temp_dir.path();
+
+        // Create compose file
+        let compose_content = r#"
+services:
+  web:
+    image: nginx:${TAG}
+  db:
+    image: postgres:14
+"#;
+        fs::write(project_dir.join("docker-compose.yml"), compose_content).unwrap();
+
+        // Create .env file
+        fs::write(project_dir.join(".env"), "TAG=1.25").unwrap();
+
+        let images = get_images_for_project(project_dir).unwrap();
+        assert!(images.contains(&"nginx:1.25".to_string()));
+        assert!(images.contains(&"postgres:14".to_string()));
+    }
+
+    #[test]
+    fn test_get_images_for_project_no_env() {
+        use tempfile::TempDir;
+
+        let temp_dir = TempDir::new().unwrap();
+        let project_dir = temp_dir.path();
+
+        // Create compose file without .env
+        let compose_content = r#"
+services:
+  web:
+    image: nginx:latest
+"#;
+        fs::write(project_dir.join("compose.yaml"), compose_content).unwrap();
+
+        let images = get_images_for_project(project_dir).unwrap();
+        assert_eq!(images, vec!["nginx:latest".to_string()]);
+    }
+
+    #[test]
+    fn test_shorten_hash() {
+        assert_eq!(shorten_hash("sha256:abc123def456xyz789"), "sha256:abc12");
+        assert_eq!(shorten_hash("short"), "short");
+    }
+
+    #[test]
+    fn test_find_compose_file_docker_compose_yml() {
+        use tempfile::TempDir;
+
+        let temp_dir = TempDir::new().unwrap();
+        fs::write(temp_dir.path().join("docker-compose.yml"), "").unwrap();
+
+        let result = find_compose_file(temp_dir.path());
+        assert!(result.is_some());
+        assert!(result.unwrap().ends_with("docker-compose.yml"));
+    }
+
+    #[test]
+    fn test_find_compose_file_compose_yaml() {
+        use tempfile::TempDir;
+
+        let temp_dir = TempDir::new().unwrap();
+        fs::write(temp_dir.path().join("compose.yaml"), "").unwrap();
+
+        let result = find_compose_file(temp_dir.path());
+        assert!(result.is_some());
+        assert!(result.unwrap().ends_with("compose.yaml"));
+    }
+
+    #[test]
+    fn test_find_compose_file_none() {
+        use tempfile::TempDir;
+
+        let temp_dir = TempDir::new().unwrap();
+        let result = find_compose_file(temp_dir.path());
+        assert!(result.is_none());
     }
 }
