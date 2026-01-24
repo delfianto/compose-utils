@@ -15,7 +15,6 @@ EnvironmentFile=-%h/.config/docker/compose.env
 WorkingDirectory=${compose_base}/%I
 ExecStart=${compose_bin_path} up --wait --remove-orphans
 ExecStop=${compose_bin_path} down --remove-orphans
-ExecStopPost=${compose_bin_path} down --remove-orphans
 Restart=on-failure
 RestartSec=10
 TimeoutStopSec=60
