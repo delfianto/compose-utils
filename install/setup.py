@@ -57,6 +57,7 @@ class Config:
             )
             self.systemctl = ["systemctl"]
             self.docker_host = args.docker_host or "unix:///var/run/docker.sock"
+            self.docker_sock = self.docker_host.replace("unix://", "")
         else:
             self.bin_dir = Path.home() / ".local/bin"
             self.systemd_dir = Path(self.xdg_config_home) / "systemd/user"
@@ -76,6 +77,7 @@ class Config:
             self.docker_host = (
                 args.docker_host or f"unix://{self.xdg_runtime_dir}/docker.sock"
             )
+            self.docker_sock = self.docker_host.replace("unix://", "")
 
     @property
     def binary_path(self) -> Path:
@@ -162,8 +164,15 @@ def install(cfg: Config) -> None:
     print(f"Checking env file at {cfg.env_file}...")
 
     # Migrate from old location if it exists
-    if cfg.mode == "rootless" and cfg.old_env_file.exists() and not cfg.env_file.exists():
-        print(f"Migrating existing env file from {cfg.old_env_file} to {cfg.env_file}...")
+    if (
+        cfg.mode == "rootless"
+        and cfg.old_env_file is not None
+        and cfg.old_env_file.exists()
+        and not cfg.env_file.exists()
+    ):
+        print(
+            f"Migrating existing env file from {cfg.old_env_file} to {cfg.env_file}..."
+        )
         cfg.env_file.parent.mkdir(parents=True, exist_ok=True)
         shutil.move(str(cfg.old_env_file), str(cfg.env_file))
 
@@ -179,6 +188,7 @@ def install(cfg: Config) -> None:
             acme_domain=cfg.acme_domain,
             acme_email=cfg.acme_email,
             docker_host=cfg.docker_host,
+            docker_sock=cfg.docker_sock,
         )
         cfg.env_file.write_text(env_content)
     else:
@@ -250,8 +260,15 @@ def reinstall(cfg: Config) -> None:
     print(f"Reinstalling for {cfg.mode} mode...")
 
     # Migrate from old location if it exists
-    if cfg.mode == "rootless" and cfg.old_env_file.exists() and not cfg.env_file.exists():
-        print(f"Migrating existing env file from {cfg.old_env_file} to {cfg.env_file}...")
+    if (
+        cfg.mode == "rootless"
+        and cfg.old_env_file is not None
+        and cfg.old_env_file.exists()
+        and not cfg.env_file.exists()
+    ):
+        print(
+            f"Migrating existing env file from {cfg.old_env_file} to {cfg.env_file}..."
+        )
         cfg.env_file.parent.mkdir(parents=True, exist_ok=True)
         shutil.move(str(cfg.old_env_file), str(cfg.env_file))
 

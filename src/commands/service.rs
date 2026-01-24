@@ -9,6 +9,7 @@ use crate::systemd::discovery::{resolve_service, resolve_services};
 use crate::systemd::journal::{JournalReader, LogEntry};
 use crate::systemd::service::{get_bare_name, get_compose_dir, normalize_unit_name};
 use anyhow::Result;
+use colored::Colorize;
 
 /// Executes the `start` (or `up`) command with smart image pulling.
 pub async fn run_start(ctx: &Context, names: &[String], deps_path: Option<String>) -> Result<()> {
@@ -215,7 +216,11 @@ fn print_entry(entry: &LogEntry) {
         .map(|dt| dt.format("%b %d %H:%M:%S").to_string())
         .unwrap_or_default();
 
-    println!("{} {}", ts, entry.message);
+    if let Some(id) = &entry.identifier {
+        println!("{} {:>12} | {}", ts.dimmed(), id.cyan(), entry.message);
+    } else {
+        println!("{} {}", ts.dimmed(), entry.message);
+    }
 }
 
 /// Executes the `enable` command.

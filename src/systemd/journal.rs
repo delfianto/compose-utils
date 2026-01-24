@@ -15,6 +15,8 @@ pub struct LogEntry {
     pub timestamp: u64,
     /// The log message.
     pub message: String,
+    /// Optional service or process identifier.
+    pub identifier: Option<String>,
 }
 
 impl JournalReader {
@@ -28,7 +30,7 @@ impl JournalReader {
 
     /// Retrieves a specified number of recent logs for a given unit.
     pub fn logs_for_unit(&mut self, unit: &str, lines: usize) -> Result<Vec<LogEntry>> {
-        self.journal.match_add("_SYSTEMD_UNIT", unit)?;
+        self.apply_unit_matches(unit)?;
         self.journal.seek_tail()?;
 
         let mut entries = Vec::with_capacity(lines);
@@ -51,7 +53,12 @@ impl JournalReader {
     where
         F: FnMut(&LogEntry) -> bool,
     {
-        self.journal.match_add("_SYSTEMD_UNIT", unit)?;
+        // Matches should already be applied by logs_for_unit, but let's ensure it.
+        // match_add is idempotent/cumulative so it doesn't hurt.
+        self.apply_unit_matches(unit)?;
+
+        // If we just called logs_for_unit, we might already be at the end.
+        // But seeking to tail ensures we don't repeat what we just read.
         self.journal.seek_tail()?;
 
         loop {
@@ -82,6 +89,43 @@ impl JournalReader {
             .ok()?
             .as_micros() as u64;
 
-        Some(LogEntry { timestamp, message })
+        // Try to get a meaningful identifier
+        let identifier = self
+            .journal
+            .get_data("COMPOSE_SERVICE")
+            .ok()
+            .flatten()
+            .and_then(|d| d.value().map(|v| String::from_utf8_lossy(v).to_string()))
+            .or_else(|| {
+                self.journal
+                    .get_data("SYSLOG_IDENTIFIER")
+                    .ok()
+                    .flatten()
+                    .and_then(|d| d.value().map(|v| String::from_utf8_lossy(v).to_string()))
+            });
+
+        Some(LogEntry {
+            timestamp,
+            message,
+            identifier,
+        })
+    }
+
+    fn apply_unit_matches(&mut self, unit: &str) -> Result<()> {
+        let bare = unit
+            .strip_prefix("compose@")
+            .and_then(|s| s.strip_suffix(".service"))
+            .unwrap_or(unit);
+
+        self.journal.match_add("_SYSTEMD_UNIT", unit)?;
+        self.journal.match_or()?;
+        self.journal.match_add("_SYSTEMD_USER_UNIT", unit)?;
+        self.journal.match_or()?;
+        self.journal.match_add("UNIT", unit)?;
+        self.journal.match_or()?;
+        self.journal.match_add("USER_UNIT", unit)?;
+        self.journal.match_or()?;
+        self.journal.match_add("COMPOSE_PROJECT", bare)?;
+        Ok(())
     }
 }
