@@ -2,10 +2,14 @@ use anyhow::Result;
 use clap::{Parser, Subcommand};
 
 mod commands;
+mod compose;
 mod constants;
 mod core;
+mod display;
+mod docker;
+mod systemd;
 
-use crate::commands::{config, deps, manage};
+use crate::commands::{config, deps};
 use crate::core::get_context;
 
 #[derive(Parser)]
@@ -92,21 +96,21 @@ async fn main() -> Result<()> {
     let ctx = get_context()?;
 
     match cli.command {
-        Commands::Start { services } => manage::run_start(&ctx, &services),
-        Commands::Stop { services } => manage::run_stop(&ctx, &services),
-        Commands::Restart { services } => manage::run_restart(&ctx, &services),
-        Commands::Update { services } => manage::run_update(&ctx, &services).await,
-        Commands::Pull { services } => manage::run_pull(&ctx, &services).await,
-        Commands::Status { services } => manage::run_systemctl(&ctx, "status", &services, false),
-        Commands::Enable { services } => manage::run_enable(&ctx, &services),
-        Commands::Disable { services } => manage::run_disable(&ctx, &services),
-        Commands::List => manage::run_list(&ctx),
-        Commands::Ps { services } => manage::run_ps(&ctx, &services).await,
+        Commands::Start { services } => commands::run_start(&ctx, &services),
+        Commands::Stop { services } => commands::run_stop(&ctx, &services),
+        Commands::Restart { services } => commands::run_restart(&ctx, &services),
+        Commands::Update { services } => commands::run_update(&ctx, &services).await,
+        Commands::Pull { services } => commands::run_pull(&ctx, &services).await,
+        Commands::Status { services } => commands::run_systemctl(&ctx, "status", &services, false),
+        Commands::Enable { services } => commands::run_enable(&ctx, &services),
+        Commands::Disable { services } => commands::run_disable(&ctx, &services),
+        Commands::List => commands::run_list(&ctx),
+        Commands::Ps { services } => commands::ps::run_ps(&ctx, &services).await,
         Commands::Logs {
             service,
             follow,
             lines,
-        } => manage::run_logs(&ctx, service.as_deref().unwrap_or(""), follow, lines),
+        } => commands::run_logs(&ctx, service.as_deref().unwrap_or(""), follow, lines),
         Commands::Deps(args) => deps::run(&ctx, args),
         Commands::Config(args) => config::run(&ctx, args),
     }
