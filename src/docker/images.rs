@@ -4,12 +4,13 @@ use anyhow::{Context as _, Result};
 use bollard::query_parameters::CreateImageOptions;
 use bollard::Docker;
 use futures_util::StreamExt;
-use std::io::{self, Write};
+use indicatif::{MultiProgress, ProgressBar, ProgressStyle};
+use std::collections::HashMap;
 
 /// Pulls a Docker image with progress output to stdout.
 ///
 /// Parses the image reference to extract repository and tag,
-/// then streams pull progress to the terminal.
+/// then streams pull progress to the terminal using multiple progress bars.
 ///
 /// # Arguments
 ///
@@ -31,28 +32,57 @@ pub async fn pull_image_with_progress(docker: &Docker, image: &str) -> Result<()
     };
 
     let mut stream = docker.create_image(Some(options), None, None);
+    let mut bars = HashMap::new();
+    let multi = MultiProgress::new();
+
+    let layer_style = ProgressStyle::with_template(
+        "  {prefix:<12} {msg:<20} {bar:30.cyan/blue} {bytes:>10}/{total_bytes:>10}",
+    )
+    .unwrap_or_else(|_| ProgressStyle::default_bar())
+    .progress_chars("#>-");
 
     while let Some(result) = stream.next().await {
         match result {
             Ok(info) => {
-                if let Some(status) = &info.status {
-                    print!("\r  {} ", status);
+                let id = info.id.as_deref().unwrap_or("system");
+                let status = info.status.as_deref().unwrap_or("");
+
+                if id != "system" {
+                    let pb = bars.entry(id.to_string()).or_insert_with(|| {
+                        let pb = multi.add(ProgressBar::new(0));
+                        pb.set_style(layer_style.clone());
+                        pb.set_prefix(id.to_string());
+                        pb
+                    });
+
+                    pb.set_message(status.to_string());
+
                     if let Some(progress) = &info.progress_detail {
                         if let (Some(current), Some(total)) = (progress.current, progress.total) {
-                            print!("[{}/{}]", current, total);
+                            pb.set_length(total as u64);
+                            pb.set_position(current as u64);
                         }
                     }
-                    io::stdout().flush()?;
+
+                    if status.contains("Download complete")
+                        || status.contains("Pull complete")
+                        || status.contains("Already exists")
+                    {
+                        pb.finish_with_message(status.to_string());
+                    }
+                } else {
+                    // System-wide status message
+                    if !status.is_empty() {
+                        multi.println(format!("  {}", status))?;
+                    }
                 }
             }
             Err(e) => {
-                println!();
                 return Err(e).context(format!("Failed to pull {}", image));
             }
         }
     }
 
-    println!("\r  Pulled {}:{}", repo, tag);
     Ok(())
 }
 
