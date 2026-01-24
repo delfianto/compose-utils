@@ -1,23 +1,28 @@
 default:
     @just --list
 
-build: check
-    cargo build --release
+# Standard build flow
+build profile="dev": (check profile)
+    cargo test {{ if profile == "release" { "--release" } else { "" } }}
+    cargo build {{ if profile == "release" { "--release" } else { "" } }}
 
-check:
-    cargo fmt
-    cargo clippy -- -D warnings
-    cargo test
-    cargo build --release
-    
+# Linting flow
+check profile="dev":
+    cargo fmt --check
+    cargo clippy {{ if profile == "release" { "--release" } else { "" } }} -- -D warnings
+
+# Housekeeping, remove build artifacts
 clean:
     cargo clean
 
-install *args: build
+# Forces 'release' profile through the dependency
+install *args: (build "release")
     python3 install/setup.py install {{ args }}
 
-uninstall *args:
-    python3 install/setup.py uninstall {{ args }}
+# Remove the compose binary
+uninstall:
+    python3 install/setup.py uninstall
 
-reinstall: build
+# Rebuild and install the compose binary and .env file
+reinstall: (build "release")
     python3 install/setup.py reinstall
