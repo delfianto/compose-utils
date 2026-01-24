@@ -17,7 +17,7 @@ pub async fn run_pull(ctx: &Context, services: &[String]) -> Result<()> {
 
         println!("{} Pulling images for '{}'...", ">>".blue(), bare);
 
-        let images = crate::compose::project::get_images_for_project(&dir)?;
+        let images = crate::compose::project::get_required_images(&dir)?;
         if images.is_empty() {
             println!("No images defined in compose file for '{}'", bare);
             continue;

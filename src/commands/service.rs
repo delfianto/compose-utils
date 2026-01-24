@@ -1,6 +1,6 @@
 //! High-level command implementations for managing systemd services via D-Bus.
 
-use crate::compose::project::get_images_for_project;
+use crate::compose::project::get_required_images;
 use crate::core::Context;
 use crate::docker::connect_docker;
 use crate::docker::images::pull_image_with_progress;
@@ -10,7 +10,7 @@ use crate::systemd::journal::{JournalReader, LogEntry};
 use crate::systemd::manager::ensure_symlink;
 use crate::systemd::service::{get_bare_name, get_compose_dir, name_to_service};
 use crate::systemd::types::JobResult;
-use anyhow::{bail, Context as _, Result};
+use anyhow::{bail, Result};
 
 /// Executes the `start` (or `up`) command with smart image pulling.
 pub async fn run_start(ctx: &Context, names: &[String]) -> Result<()> {
@@ -26,7 +26,7 @@ pub async fn run_start(ctx: &Context, names: &[String]) -> Result<()> {
         let unit_name = name_to_service(bare);
 
         // 1. Check for required images
-        let images = get_images_for_project(&compose_dir)?;
+        let images = get_required_images(&compose_dir)?;
 
         if !images.is_empty() {
             println!("Checking images for {}...", bare);
@@ -117,7 +117,7 @@ pub async fn run_restart(ctx: &Context, names: &[String]) -> Result<()> {
         let unit_name = name_to_service(bare);
 
         // Check and pull images before restart
-        let images = get_images_for_project(&compose_dir)?;
+        let images = get_required_images(&compose_dir)?;
         if !images.is_empty() {
             let mut missing = Vec::new();
             for image in &images {
@@ -230,6 +230,12 @@ pub async fn run_status(ctx: &Context, names: &[String]) -> Result<()> {
                 if !props.wants.is_empty() {
                     println!("   Wants: {}", props.wants.join(", "));
                 }
+                if !props.after.is_empty() {
+                    println!("   After: {}", props.after.join(", "));
+                }
+                if !props.before.is_empty() {
+                    println!("   Before: {}", props.before.join(", "));
+                }
                 println!();
             }
             Err(e) => {
@@ -252,27 +258,16 @@ fn print_entry(entry: &LogEntry) {
 
 /// Executes the `enable` command.
 pub async fn run_enable(ctx: &Context, names: &[String]) -> Result<()> {
+    let systemd = SystemdClient::new(!ctx.is_root).await?;
     let services = resolve_services(ctx, names)?;
 
     for name in &services {
         let bare = get_bare_name(name);
         ensure_symlink(ctx, bare)?;
-    }
 
-    let mut cmd = std::process::Command::new("systemctl");
-    if !ctx.is_root {
-        cmd.arg("--user");
-    }
-    cmd.arg("enable");
-
-    for name in &services {
-        let bare = get_bare_name(name);
-        cmd.arg(name_to_service(bare));
-    }
-
-    let status = cmd.status().context("Failed to enable units")?;
-    if !status.success() {
-        bail!("Failed to enable units");
+        let unit_name = name_to_service(bare);
+        println!("Enabling {}...", unit_name);
+        systemd.enable_unit(&unit_name).await?;
     }
 
     Ok(())
@@ -280,28 +275,16 @@ pub async fn run_enable(ctx: &Context, names: &[String]) -> Result<()> {
 
 /// Executes the `disable` command.
 pub async fn run_disable(ctx: &Context, names: &[String]) -> Result<()> {
+    let systemd = SystemdClient::new(!ctx.is_root).await?;
     let services = resolve_services(ctx, names)?;
 
-    let mut cmd = std::process::Command::new("systemctl");
-    if !ctx.is_root {
-        cmd.arg("--user");
-    }
-    cmd.arg("disable");
-
     for name in &services {
         let bare = get_bare_name(name);
-        cmd.arg(name_to_service(bare));
-    }
+        let unit_name = name_to_service(bare);
 
-    let status = cmd.status().context("Failed to disable units")?;
-
-    for name in &services {
-        let bare = get_bare_name(name);
+        println!("Disabling {}...", unit_name);
+        systemd.disable_unit(&unit_name).await?;
         crate::systemd::manager::remove_symlink(ctx, bare)?;
-    }
-
-    if !status.success() {
-        bail!("Failed to disable units");
     }
 
     Ok(())

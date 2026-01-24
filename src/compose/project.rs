@@ -45,7 +45,7 @@ pub fn find_compose_file(dir: &Path) -> Option<PathBuf> {
 /// - No compose file is found.
 /// - The compose file or `.env` file cannot be read.
 /// - The YAML content is malformed.
-pub fn get_images_for_project(project_dir: &Path) -> Result<Vec<String>> {
+pub fn get_required_images(project_dir: &Path) -> Result<Vec<String>> {
     let compose_file = find_compose_file(project_dir)
         .ok_or_else(|| anyhow::anyhow!("No compose file found in {:?}", project_dir))?;
     let env_file = project_dir.join(".env");
@@ -132,7 +132,7 @@ services:
         // Create .env file
         fs::write(project_dir.join(".env"), "TAG=1.25").unwrap();
 
-        let images = get_images_for_project(project_dir).unwrap();
+        let images = get_required_images(project_dir).unwrap();
         assert!(images.contains(&"nginx:1.25".to_string()));
         assert!(images.contains(&"postgres:14".to_string()));
     }
@@ -152,7 +152,7 @@ services:
 "#;
         fs::write(project_dir.join("compose.yaml"), compose_content).unwrap();
 
-        let images = get_images_for_project(project_dir).unwrap();
+        let images = get_required_images(project_dir).unwrap();
         assert_eq!(images, vec!["nginx:latest".to_string()]);
     }
 }

@@ -44,7 +44,7 @@ pub async fn run(ctx: &Context, args: DepsArgs) -> Result<()> {
     } else if let Some(deps) = &args.remove {
         remove_deps(ctx, &args.service, deps).await
     } else {
-        list_deps(ctx, &args.service)
+        list_deps(ctx, &args.service).await
     }
 }
 
@@ -181,7 +181,7 @@ async fn remove_deps(ctx: &Context, service: &str, deps_to_remove: &[String]) ->
     let override_file = get_override_file(ctx, service);
     if !override_file.exists() {
         println!("No dependencies to remove");
-        return Ok(());
+        return Ok(())
     }
 
     let mut current_deps = parse_override_file(&override_file)?;
@@ -208,20 +208,28 @@ async fn remove_deps(ctx: &Context, service: &str, deps_to_remove: &[String]) ->
 }
 
 /// Logic for the `list` action.
-fn list_deps(ctx: &Context, service: &str) -> Result<()> {
-    let override_file = get_override_file(ctx, service);
-    if !override_file.exists() {
-        println!("No explicit dependencies for {}", service);
-        return Ok(());
+async fn list_deps(ctx: &Context, service: &str) -> Result<()> {
+    let service_name = get_compose_service_name(service);
+    let systemd = SystemdClient::new(!ctx.is_root).await?;
+
+    println!("Dependency tree for {}:", service_name);
+    match systemd.get_dependency_tree(&service_name).await {
+        Ok(tree) => tree.print(0),
+        Err(e) => println!("  Failed to retrieve dependency tree: {}", e),
     }
 
-    let deps = parse_override_file(&override_file)?;
-    for key in ["Requires", "Wants", "After"] {
-        if let Some(v) = deps.get(key) {
-            if !v.is_empty() {
-                println!("{}:", key);
-                for item in v {
-                    println!("  - {}", item);
+    // Also show explicit overrides if they exist
+    let override_file = get_override_file(ctx, service);
+    if override_file.exists() {
+        println!("\nExplicit overrides in {}:", override_file.display());
+        let deps = parse_override_file(&override_file)?;
+        for key in ["Requires", "Wants", "After"] {
+            if let Some(v) = deps.get(key) {
+                if !v.is_empty() {
+                    println!("  {}:", key);
+                    for item in v {
+                        println!("    - {}", item);
+                    }
                 }
             }
         }

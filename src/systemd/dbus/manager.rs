@@ -45,6 +45,21 @@ pub trait Manager {
     /// Subscribes to signals.
     fn subscribe(&self) -> zbus::Result<()>;
 
+    /// Enables unit files.
+    fn enable_unit_files(
+        &self,
+        files: Vec<&str>,
+        runtime: bool,
+        force: bool,
+    ) -> zbus::Result<(bool, Vec<(String, String, String)>)>;
+
+    /// Disables unit files.
+    fn disable_unit_files(
+        &self,
+        files: Vec<&str>,
+        runtime: bool,
+    ) -> zbus::Result<Vec<(String, String, String)>>;
+
     /// Signal emitted when a job is removed.
     #[zbus(signal)]
     fn job_removed(&self, id: u32, job: OwnedObjectPath, unit: &str, result: &str);
