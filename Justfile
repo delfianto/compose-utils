@@ -18,14 +18,6 @@ test:
 build *args:
     cargo build {{ args }}
 
-# Install the application
+# Install the application (Interactive or with --env-file)
 install *args:
-    python3 setup.py install {{ args }}
-
-# Remove the application
-uninstall:
-    python3 setup.py uninstall
-
-# Reinstall the application
-reinstall:
-    python3 setup.py reinstall
+    ./systemd/install.sh {{ args }}

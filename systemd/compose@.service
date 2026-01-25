@@ -12,11 +12,6 @@ RemainAfterExit=yes
 EnvironmentFile=-/etc/compose.env
 EnvironmentFile=-%h/.config/compose.env
 EnvironmentFile=-%h/.config/docker/compose.env
-
-# We delegate the actual docker compose execution to the 'compose' binary itself.
-# The 'run-service' command handles resolving the directory structure (e.g. flat -> nested)
-# and executing 'docker compose up'.
-# BINARY_PATH is a placeholder replaced by install.sh.
 ExecStart=BINARY_PATH run-service %i
 ExecStop=BINARY_PATH stop-service %i
 

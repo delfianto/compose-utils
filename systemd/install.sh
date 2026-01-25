@@ -55,7 +55,7 @@ REQUIRED_KEYS=(
 validate_env_file() {
     local file=$1
     local missing=0
-    
+
     if [ ! -f "$file" ]; then
         log_err "File not found: $file"
         return 1
@@ -74,7 +74,7 @@ validate_env_file() {
 # Function for interactive configuration
 interactive_setup() {
     local temp_file=$(mktemp)
-    
+
     # Determine defaults based on detected mode
     if [ "$IS_ROOT" = true ]; then
         local default_data="/srv/data"
@@ -88,25 +88,25 @@ interactive_setup() {
 
     echo -e "\n${YELLOW}Interactive Configuration:${NC}"
     echo "Press Enter to accept the default values."
-    
+
     read -p "COMPOSE_DATA [$default_data]: " val_data
     val_data=${val_data:-$default_data}
-    
+
     read -p "COMPOSE_BASE [$default_base]: " val_base
     val_base=${val_base:-$default_base}
-    
+
     read -p "TRAEFIK_ACME_DOMAIN [example.com]: " val_domain
     val_domain=${val_domain:-example.com}
-    
+
     read -p "TRAEFIK_ACME_EMAIL [admin@example.com]: " val_email
     val_email=${val_email:-admin@example.com}
-    
+
     read -p "TRAEFIK_ACME_SERVER [https://acme-v02.api.letsencrypt.org/directory]: " val_server
     val_server=${val_server:-https://acme-v02.api.letsencrypt.org/directory}
-    
+
     read -p "DOCKER_SOCK [$default_docker_sock]: " val_sock
     val_sock=${val_sock:-$default_docker_sock}
-    
+
     local default_host="unix://$val_sock"
     read -p "DOCKER_HOST [$default_host]: " val_host
     val_host=${val_host:-$default_host}
@@ -139,11 +139,11 @@ while [[ $# -gt 0 ]]; do
         --env-file)
             INPUT_ENV="$2"
             shift 2
-            ;; 
+            ;;
         *)
             echo "Unknown option: $1"
             exit 1
-            ;; 
+            ;;
     esac
 done
 
@@ -182,7 +182,7 @@ else
     if [ -f "$CONF_FILE" ]; then
         echo -e "\nConfiguration file already exists at: $CONF_FILE"
         read -p "Do you want to reconfigure it? [y/N] " choice
-        case "$choice" in 
+        case "$choice" in
             y|Y ) RECONFIGURE=1 ;;
             * ) RECONFIGURE=0 ;;
         esac
@@ -201,7 +201,7 @@ else
                 # Manual
                 if [ ! -f "$CONF_FILE" ]; then
                     cp "systemd/compose.env" "$CONF_FILE"
-                    
+
                     # Try to adjust defaults for the chosen mode
                     if [ "$IS_ROOT" = false ]; then
                         sed -i "s|/srv/data|$HOME/data|g" "$CONF_FILE"
@@ -213,11 +213,11 @@ else
                 echo "Please edit the configuration file at:"
                 echo "  $CONF_FILE"
                 echo "Ensure all required variables are set."
-                ;; 
+                ;;
             *)
                 # Interactive (Default)
                 interactive_setup
-                ;; 
+                ;;
         esac
     else
         log_info "Skipping configuration update."
