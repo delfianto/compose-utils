@@ -1,11 +1,9 @@
 //! High-level command implementations for managing systemd compose services.
 
 use crate::core::Context;
-use crate::systemd::discovery::{resolve_service, resolve_services};
-use crate::systemd::journal::{JournalReader, LogEntry};
+use crate::systemd::discovery::resolve_services;
 use crate::systemd::service::{get_bare_name, get_compose_dir, normalize_unit_name};
 use anyhow::Result;
-use colored::Colorize;
 
 /// Executes the `start` (or `up`) command with smart image pulling.
 pub async fn run_start(ctx: &Context, names: &[String], deps_path: Option<String>) -> Result<()> {
@@ -87,60 +85,6 @@ pub async fn run_restart(ctx: &Context, names: &[String]) -> Result<()> {
     Ok(())
 }
 
-/// Executes the `list` (or `ls`) command to show all `compose@` units.
-pub async fn run_list(ctx: &Context) -> Result<()> {
-    let units = crate::systemd::manager::list_units(ctx, Some("compose@"))?;
-
-    if units.is_empty() {
-        println!("No compose units found.");
-        return Ok(());
-    }
-
-    println!("{:<40} {:<15} {:<15} DESCRIPTION", "UNIT", "ACTIVE", "SUB");
-    for unit in units {
-        println!(
-            "{:<40} {:<15} {:<15} {}",
-            unit.name, unit.active, unit.sub, unit.description
-        );
-    }
-
-    Ok(())
-}
-
-/// Executes the `logs` command using native journal integration.
-pub async fn run_logs(
-    ctx: &Context,
-    service: &str,
-    follow: bool,
-    lines: Option<usize>,
-) -> Result<()> {
-    let resolved = resolve_service(ctx, service)?;
-    let bare = get_bare_name(&resolved);
-    let unit_name = normalize_unit_name(ctx, bare);
-
-    let mut reader = JournalReader::new()?;
-    let n = lines.unwrap_or(100);
-
-    if follow {
-        let entries = reader.logs_for_unit(&unit_name, n)?;
-        for entry in entries {
-            print_entry(&entry);
-        }
-
-        reader.follow_unit(&unit_name, |entry| {
-            print_entry(entry);
-            true
-        })?;
-    } else {
-        let entries = reader.logs_for_unit(&unit_name, n)?;
-        for entry in entries {
-            print_entry(&entry);
-        }
-    }
-
-    Ok(())
-}
-
 /// Executes the `status` command for a set of services.
 pub async fn run_status(ctx: &Context, names: &[String]) -> Result<()> {
     let services = resolve_services(ctx, names)?;
@@ -159,18 +103,6 @@ pub async fn run_status(ctx: &Context, names: &[String]) -> Result<()> {
     }
 
     Ok(())
-}
-
-fn print_entry(entry: &LogEntry) {
-    let ts = chrono::DateTime::from_timestamp_micros(entry.timestamp as i64)
-        .map(|dt| dt.format("%b %d %H:%M:%S").to_string())
-        .unwrap_or_default();
-
-    if let Some(id) = &entry.identifier {
-        println!("{} {:>12} | {}", ts.dimmed(), id.cyan(), entry.message);
-    } else {
-        println!("{} {}", ts.dimmed(), entry.message);
-    }
 }
 
 /// Executes the `enable` command.

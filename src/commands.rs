@@ -13,6 +13,6 @@ pub mod update;
 
 pub use pull::run_pull;
 pub use service::{
-    run_disable, run_enable, run_list, run_logs, run_restart, run_start, run_status, run_stop,
+    run_disable, run_enable, run_restart, run_start, run_status, run_stop,
 };
 pub use update::run_update;

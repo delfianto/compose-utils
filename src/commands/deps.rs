@@ -477,20 +477,4 @@ mod tests {
         assert!(content.contains("compose@app2.service"));
         assert!(!content.contains("stale.service"));
     }
-
-    fn test_add_dependencies() -> Result<()> {
-        let test_dir = TestDir::new("deps-test")?;
-        let ctx = mock_context(&test_dir.path());
-
-        let mut deps = ServiceDependencies::default();
-        add_logic(&mut deps, &["db".to_string()], false)?;
-
-        assert!(deps.requires.contains(&"compose@db.service".to_string()));
-        assert!(deps.binds_to.contains(&"compose@db.service".to_string()));
-        assert!(deps.after.contains(&"compose@db.service".to_string()));
-
-        assert!(deps.requires.contains(&"docker.service".to_string()));
-
-        Ok(())
-    }
 }

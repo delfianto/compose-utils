@@ -83,24 +83,10 @@ enum Commands {
         /// List of service names to disable.
         services: Vec<String>,
     },
-    /// List all managed Docker Compose services.
-    #[command(visible_alias = "ls")]
-    List,
     /// List Docker containers and their statuses.
     Ps {
         /// List of service names to filter by (optional).
         services: Vec<String>,
-    },
-    /// View service logs via journalctl.
-    Logs {
-        /// Name of the service to show logs for.
-        service: Option<String>,
-        /// Follow log output in real-time.
-        #[arg(short, long)]
-        follow: bool,
-        /// Number of recent log lines to display.
-        #[arg(short = 'n', long)]
-        lines: Option<usize>,
     },
     /// Manage service dependencies.
     Deps(deps::DepsArgs),
@@ -140,13 +126,7 @@ async fn main() -> Result<()> {
         Commands::Status { services } => commands::run_status(&ctx, &services).await,
         Commands::Enable { services, deps } => commands::run_enable(&ctx, &services, deps).await,
         Commands::Disable { services } => commands::run_disable(&ctx, &services).await,
-        Commands::List => commands::run_list(&ctx).await,
         Commands::Ps { services } => commands::ps::run_ps(&ctx, &services).await,
-        Commands::Logs {
-            service,
-            follow,
-            lines,
-        } => commands::run_logs(&ctx, service.as_deref().unwrap_or(""), follow, lines).await,
         Commands::Deps(args) => deps::run(&ctx, args).await,
         Commands::Config(args) => config::run(&ctx, args),
 
