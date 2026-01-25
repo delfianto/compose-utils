@@ -12,9 +12,12 @@ RemainAfterExit=yes
 EnvironmentFile=-/etc/compose.env
 EnvironmentFile=-%h/.config/compose.env
 EnvironmentFile=-%h/.config/docker/compose.env
-WorkingDirectory=${compose_base}/%I
-ExecStart=${compose_bin_path} up --wait --remove-orphans
-ExecStop=${compose_bin_path} down --remove-orphans
+# COMPOSE_BASE defaults to /srv/compose if not set in EnvironmentFile.
+# However, systemd variable substitution requires the variable to be set in the environment.
+# Since we can't provide a default in ExecStart line easily, we rely on compose.env having it,
+# or the user setting it.
+ExecStart=/usr/bin/docker compose --project-directory ${COMPOSE_BASE}/%i up --wait --remove-orphans
+ExecStop=/usr/bin/docker compose --project-directory ${COMPOSE_BASE}/%i down --remove-orphans
 Restart=on-failure
 RestartSec=10
 TimeoutStopSec=60

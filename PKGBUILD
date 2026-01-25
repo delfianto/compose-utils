@@ -11,6 +11,7 @@ depends=('docker' 'systemd')
 makedepends=('cargo' 'git')
 source=("git+file://$(pwd)") # Assumes you build from local git
 sha256sums=('SKIP')
+backup=('etc/compose.env')
 
 prepare() {
     cd "$srcdir/$pkgname"
@@ -31,8 +32,11 @@ package() {
     # Install binary
     install -Dm755 "target/release/compose" "$pkgdir/usr/bin/compose"
 
-    # Install Systemd Template (Create this folder structure in your source first)
+    # Install Systemd Template
     install -Dm644 "systemd/compose@.service" "$pkgdir/usr/lib/systemd/system/compose@.service"
+
+    # Install Config
+    install -Dm644 "systemd/compose.env" "$pkgdir/etc/compose.env"
 
     # Install License
     install -Dm644 LICENSE "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
