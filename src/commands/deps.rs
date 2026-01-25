@@ -1,0 +1,496 @@
+//! Logic for managing dependencies between systemd services using drop-in overrides.
+
+use crate::core::Context;
+use anyhow::Result;
+use clap::Args;
+use std::collections::HashMap;
+use std::fs;
+use std::path::{Path, PathBuf};
+
+/// Command-line arguments for the `deps` subcommand.
+#[derive(Args)]
+pub struct DepsArgs {
+    /// The name of the service to manage dependencies for.
+    #[arg(help = "Service name")]
+    pub service: Option<String>,
+
+    /// Add one or more services as dependencies.
+    #[arg(long, help = "Add dependencies")]
+    pub add: Option<Vec<String>>,
+
+    /// Remove one or more services from dependencies.
+    #[arg(long, help = "Remove dependencies")]
+    pub remove: Option<Vec<String>>,
+
+    /// List currently configured dependencies for the service.
+    #[arg(long, help = "List dependencies")]
+    pub list: bool,
+
+    /// Use `Requires` instead of `Wants` when adding dependencies.
+    #[arg(long, help = "Use Requires instead of Wants")]
+    pub requires: bool,
+
+    /// Reset all dependencies for the service by removing the override file.
+    #[arg(long, help = "Clear all dependencies")]
+    pub clear: bool,
+}
+
+/// Entry point for the `deps` command.
+///
+/// # Arguments
+///
+/// * `ctx` - The application context.
+/// * `args` - The parsed command arguments.
+pub async fn run(ctx: &Context, args: DepsArgs) -> Result<()> {
+    match args.service {
+        Some(service) => {
+            if args.clear {
+                clear_deps(ctx, &service).await
+            } else if let Some(deps) = &args.add {
+                add_deps(ctx, &service, deps, args.requires).await
+            } else if let Some(deps) = &args.remove {
+                remove_deps(ctx, &service, deps).await
+            } else {
+                list_deps(ctx, &service).await
+            }
+        }
+        None => {
+            if args.add.is_some() || args.remove.is_some() || args.clear {
+                anyhow::bail!("Cannot modify dependencies without specifying a service.");
+            }
+            list_all_deps(ctx).await
+        }
+    }
+}
+
+async fn clear_deps(ctx: &Context, service: &str) -> Result<()> {
+    let override_file = get_override_file(ctx, service);
+    if override_file.exists() {
+        println!("Clearing dependencies for {}...", service);
+        fs::remove_file(&override_file)?;
+        crate::systemd::manager::daemon_reload(ctx)?;
+    } else {
+        println!("No dependencies found for {}", service);
+    }
+    Ok(())
+}
+
+async fn list_all_deps(ctx: &Context) -> Result<()> {
+    crate::systemd::manager::list_dependencies(ctx, None)
+}
+
+/// Returns the path to the systemd drop-in override directory for a service.
+fn get_override_dir(ctx: &Context, service: &str) -> PathBuf {
+    let service_name = crate::systemd::service::normalize_unit_name(ctx, service);
+    ctx.systemd_dir.join(format!("{}.d", service_name))
+}
+
+/// Returns the path to the dependency configuration file within the override directory.
+fn get_override_file(ctx: &Context, service: &str) -> PathBuf {
+    get_override_dir(ctx, service).join("dependencies.conf")
+}
+
+/// Internal type for storing parsed systemd unit dependencies.
+type SystemdDeps = HashMap<String, Vec<String>>;
+
+/// Parses a systemd drop-in override file to extract dependency keys.
+fn parse_override_file(override_file: &Path) -> Result<SystemdDeps> {
+    let mut deps: SystemdDeps = HashMap::new();
+    deps.insert("Requires".to_string(), Vec::new());
+    deps.insert("Wants".to_string(), Vec::new());
+    deps.insert("BindsTo".to_string(), Vec::new());
+    deps.insert("After".to_string(), Vec::new());
+
+    if !override_file.exists() {
+        return Ok(deps);
+    }
+
+    let content = fs::read_to_string(override_file)?;
+    let mut current_section = String::new();
+
+    for line in content.lines() {
+        let line = line.trim();
+        if line.is_empty() || line.starts_with('#') {
+            continue;
+        }
+        if line.starts_with('[') && line.ends_with(']') {
+            current_section = line[1..line.len() - 1].to_string();
+            continue;
+        }
+
+        if current_section != "Unit" {
+            continue;
+        }
+
+        if let Some((key, val)) = line.split_once('=') {
+            let key = key.trim().to_string();
+            let val = val.trim().to_string();
+            if !val.is_empty() {
+                deps.entry(key).or_default().push(val);
+            }
+        }
+    }
+    Ok(deps)
+}
+
+/// Writes dependency configuration to a systemd drop-in override file.
+fn write_override_file(override_file: &Path, deps: &SystemdDeps) -> Result<()> {
+    let mut lines = Vec::new();
+    lines.push("[Unit]".to_string());
+
+    for key in ["Requires", "Wants", "BindsTo", "After"] {
+        if let Some(values) = deps.get(key) {
+            for v in values {
+                lines.push(format!("{}={}", key, v));
+            }
+        }
+    }
+
+    fs::write(override_file, lines.join("\n") + "\n")?;
+    Ok(())
+}
+
+/// Logic for the `add` action.
+async fn add_deps(
+    ctx: &Context,
+    service: &str,
+    deps_to_add: &[String],
+    requires: bool,
+) -> Result<()> {
+    let override_dir = get_override_dir(ctx, service);
+    let override_file = get_override_file(ctx, service);
+
+    fs::create_dir_all(&override_dir)?;
+
+    let mut current_deps = parse_override_file(&override_file)?;
+    let dep_type = if requires { "Requires" } else { "Wants" };
+
+    for dep in deps_to_add {
+        let dep_name = crate::systemd::service::normalize_unit_name(ctx, dep);
+
+        let list = current_deps.entry(dep_type.to_string()).or_default();
+        if !list.contains(&dep_name) {
+            list.push(dep_name.clone());
+        }
+
+        let after_list = current_deps.entry("After".to_string()).or_default();
+        if !after_list.contains(&dep_name) {
+            after_list.push(dep_name);
+        }
+    }
+
+    write_override_file(&override_file, &current_deps)?;
+    println!("Added dependencies to {}", service);
+
+    crate::systemd::manager::daemon_reload(ctx)?;
+
+    Ok(())
+}
+
+/// Applies the dependency configuration to a service.
+///
+/// This updates the systemd override file to match the provided configuration.
+/// Existing dependencies not specified in the config are preserved, unless
+/// there is a conflict (which currently shouldn't happen as we just append).
+pub fn apply_dependencies(
+    ctx: &Context,
+    service: &str,
+    config: &crate::compose::dependencies::ServiceConfig,
+) -> Result<()> {
+    let override_dir = get_override_dir(ctx, service);
+    let override_file = get_override_file(ctx, service);
+
+    fs::create_dir_all(&override_dir)?;
+
+    // Start with a clean slate to avoid stale dependencies
+    let mut current_deps: SystemdDeps = HashMap::new();
+    current_deps.insert("Requires".to_string(), Vec::new());
+    current_deps.insert("Wants".to_string(), Vec::new());
+    current_deps.insert("BindsTo".to_string(), Vec::new());
+    current_deps.insert("After".to_string(), Vec::new());
+
+    // Standard dependencies that always exist for every compose service
+    let standard_deps = vec!["docker.service".to_string()];
+    update_deps_list(ctx, &mut current_deps, "Requires", &standard_deps);
+    update_deps_list(ctx, &mut current_deps, "BindsTo", &standard_deps);
+
+    if let Some(requires) = &config.requires {
+        update_deps_list(ctx, &mut current_deps, "Requires", requires);
+
+        // If BindsTo is not explicitly provided, default it to the same as Requires
+        if config.binds_to.is_none() {
+            update_deps_list(ctx, &mut current_deps, "BindsTo", requires);
+        }
+    }
+
+    if let Some(wants) = &config.wants {
+        update_deps_list(ctx, &mut current_deps, "Wants", wants);
+    }
+
+    if let Some(binds) = &config.binds_to {
+        update_deps_list(ctx, &mut current_deps, "BindsTo", binds);
+    }
+
+    // Process explicit After.
+    if let Some(after) = &config.after {
+        for item in after {
+            let name = crate::systemd::service::normalize_unit_name(ctx, item);
+            let list = current_deps.entry("After".to_string()).or_default();
+            if !list.contains(&name) {
+                list.push(name);
+            }
+        }
+    }
+
+    write_override_file(&override_file, &current_deps)?;
+    Ok(())
+}
+
+fn update_deps_list(ctx: &Context, deps: &mut SystemdDeps, key: &str, items: &[String]) {
+    for item in items {
+        let name = crate::systemd::service::normalize_unit_name(ctx, item);
+
+        let list = deps.entry(key.to_string()).or_default();
+        if !list.contains(&name) {
+            list.push(name.clone());
+        }
+
+        let after_list = deps.entry("After".to_string()).or_default();
+        if !after_list.contains(&name) {
+            after_list.push(name);
+        }
+    }
+}
+
+/// Logic for the `remove` action.
+async fn remove_deps(ctx: &Context, service: &str, deps_to_remove: &[String]) -> Result<()> {
+    let override_file = get_override_file(ctx, service);
+    if !override_file.exists() {
+        println!("No dependencies to remove");
+        return Ok(());
+    }
+
+    let mut current_deps = parse_override_file(&override_file)?;
+
+    for dep in deps_to_remove {
+        let dep_name = crate::systemd::service::normalize_unit_name(ctx, dep);
+
+        for key in ["Requires", "Wants", "After"] {
+            if let Some(list) = current_deps.get_mut(key) {
+                if let Some(pos) = list.iter().position(|x| x == &dep_name) {
+                    list.remove(pos);
+                }
+            }
+        }
+    }
+
+    write_override_file(&override_file, &current_deps)?;
+    println!("Removed dependencies from {}", service);
+
+    crate::systemd::manager::daemon_reload(ctx)?;
+
+    Ok(())
+}
+
+/// Logic for the `list` action.
+async fn list_deps(ctx: &Context, service: &str) -> Result<()> {
+    let service_name = crate::systemd::service::normalize_unit_name(ctx, service);
+
+    println!("Dependency tree for {}:", service_name);
+    if let Err(e) = crate::systemd::manager::list_dependencies(ctx, Some(&service_name)) {
+        println!("  Failed to retrieve dependency tree: {}", e);
+    }
+
+    // Also show explicit overrides if they exist
+    let override_file = get_override_file(ctx, service);
+    if override_file.exists() {
+        println!("\nExplicit overrides in {}:", override_file.display());
+        let deps = parse_override_file(&override_file)?;
+        for key in ["Requires", "Wants", "After"] {
+            if let Some(v) = deps.get(key) {
+                if !v.is_empty() {
+                    println!("  {}:", key);
+                    for item in v {
+                        println!("    - {}", item);
+                    }
+                }
+            }
+        }
+    }
+    Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tempfile::tempdir;
+
+    #[test]
+    fn test_normalize_unit_name() {
+        use crate::systemd::service::normalize_unit_name;
+        let dir = tempdir().unwrap();
+        let ctx = Context {
+            is_root: false,
+            systemd_dir: dir.path().to_path_buf(),
+            compose_base: dir.path().join("compose"),
+            env_file: dir.path().join("env"),
+            docker_host: None,
+        };
+        fs::create_dir_all(&ctx.compose_base).unwrap();
+        fs::create_dir_all(ctx.compose_base.join("myapp")).unwrap();
+
+        assert_eq!(normalize_unit_name(&ctx, "myapp"), "compose@myapp.service");
+        assert_eq!(
+            normalize_unit_name(&ctx, "compose@myapp"),
+            "compose@myapp.service"
+        );
+        assert_eq!(
+            normalize_unit_name(&ctx, "compose@myapp.service"),
+            "compose@myapp.service"
+        );
+        // Standard services should not be prefixed
+        assert_eq!(
+            normalize_unit_name(&ctx, "docker.service"),
+            "docker.service"
+        );
+        assert_eq!(
+            normalize_unit_name(&ctx, "network.target"),
+            "network.target"
+        );
+        assert_eq!(normalize_unit_name(&ctx, "dbus.socket"), "dbus.socket");
+        assert_eq!(
+            normalize_unit_name(&ctx, "user@1000.service"),
+            "user@1000.service"
+        );
+        // Fallback for bare "docker"
+        assert_eq!(normalize_unit_name(&ctx, "docker"), "docker.service");
+    }
+
+    #[test]
+    fn test_parse_override_file_empty() {
+        let dir = tempdir().unwrap();
+        let file = dir.path().join("test.conf");
+        let deps = parse_override_file(&file).unwrap();
+        assert!(deps.get("Wants").unwrap().is_empty());
+    }
+
+    #[test]
+    fn test_parse_override_file_valid() {
+        let dir = tempdir().unwrap();
+        let file = dir.path().join("test.conf");
+        let content = "[Unit]\nWants=compose@db.service\nAfter=compose@db.service\n";
+        fs::write(&file, content).unwrap();
+
+        let deps = parse_override_file(&file).unwrap();
+        assert_eq!(deps.get("Wants").unwrap(), &vec!["compose@db.service"]);
+        assert_eq!(deps.get("After").unwrap(), &vec!["compose@db.service"]);
+    }
+
+    #[test]
+    fn test_write_override_file() {
+        let dir = tempdir().unwrap();
+        let file = dir.path().join("test.conf");
+        let mut deps: SystemdDeps = HashMap::new();
+        deps.insert("Wants".to_string(), vec!["compose@db.service".to_string()]);
+
+        write_override_file(&file, &deps).unwrap();
+        let content = fs::read_to_string(&file).unwrap();
+        assert!(content.contains("[Unit]"));
+        assert!(content.contains("Wants=compose@db.service"));
+    }
+
+    #[test]
+    fn test_apply_dependencies_creates_file() {
+        let dir = tempdir().unwrap();
+        let ctx = Context {
+            is_root: false,
+            systemd_dir: dir.path().to_path_buf(),
+            compose_base: dir.path().join("compose"),
+            env_file: dir.path().join("env"),
+            docker_host: None,
+        };
+
+        fs::create_dir_all(&ctx.compose_base).unwrap();
+        fs::create_dir_all(ctx.compose_base.join("pgvector")).unwrap();
+        fs::create_dir_all(ctx.compose_base.join("ollama")).unwrap();
+
+        let config = crate::compose::dependencies::ServiceConfig {
+            requires: Some(vec!["pgvector".to_string(), "docker.service".to_string()]),
+            wants: Some(vec!["ollama".to_string()]),
+            binds_to: None,
+            after: None,
+        };
+
+        apply_dependencies(&ctx, "myapp", &config).unwrap();
+
+        let override_file = get_override_file(&ctx, "myapp");
+        assert!(override_file.exists());
+
+        let content = fs::read_to_string(&override_file).unwrap();
+        assert!(content.contains("Requires="));
+        assert!(content.contains("compose@pgvector.service"));
+        assert!(content.contains("docker.service"));
+        assert!(content.contains("Wants="));
+        assert!(content.contains("compose@ollama.service"));
+
+        assert!(content.contains("After="));
+        assert!(content.contains("compose@pgvector.service"));
+        assert!(content.contains("docker.service"));
+        assert!(content.contains("compose@ollama.service"));
+    }
+
+    #[test]
+    fn test_apply_dependencies_overwrites() {
+        let dir = tempdir().unwrap();
+        let ctx = Context {
+            is_root: false,
+            systemd_dir: dir.path().to_path_buf(),
+            compose_base: dir.path().join("compose"),
+            env_file: dir.path().join("env"),
+            docker_host: None,
+        };
+        fs::create_dir_all(&ctx.compose_base).unwrap();
+        fs::create_dir_all(ctx.compose_base.join("app1")).unwrap();
+        fs::create_dir_all(ctx.compose_base.join("app2")).unwrap();
+
+        let override_file = get_override_file(&ctx, "myapp");
+        fs::create_dir_all(override_file.parent().unwrap()).unwrap();
+        fs::write(
+            &override_file,
+            "[Unit]\nRequires=stale.service\nAfter=stale.service\n",
+        )
+        .unwrap();
+
+        let config = crate::compose::dependencies::ServiceConfig {
+            requires: Some(vec!["app1".to_string()]),
+            wants: None,
+            binds_to: None,
+            after: Some(vec!["app2".to_string()]),
+        };
+
+        apply_dependencies(&ctx, "myapp", &config).unwrap();
+
+        let content = fs::read_to_string(&override_file).unwrap();
+        assert!(content.contains("Requires="));
+        assert!(content.contains("compose@app1.service"));
+        assert!(content.contains("After="));
+        assert!(content.contains("compose@app2.service"));
+        assert!(!content.contains("stale.service"));
+    }
+
+    fn test_add_dependencies() -> Result<()> {
+        let test_dir = TestDir::new("deps-test")?;
+        let ctx = mock_context(&test_dir.path());
+
+        let mut deps = ServiceDependencies::default();
+        add_logic(&mut deps, &["db".to_string()], false)?;
+
+        assert!(deps.requires.contains(&"compose@db.service".to_string()));
+        assert!(deps.binds_to.contains(&"compose@db.service".to_string()));
+        assert!(deps.after.contains(&"compose@db.service".to_string()));
+
+        assert!(deps.requires.contains(&"docker.service".to_string()));
+
+        Ok(())
+    }
+}
