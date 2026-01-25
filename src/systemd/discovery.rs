@@ -1,6 +1,5 @@
 //! Logic for discovering and resolving systemd services based on the filesystem.
 
-use super::service::{get_bare_name, get_compose_dir};
 use crate::core::Context;
 use crate::core::COMPOSE_FILES;
 use crate::verbose;
@@ -88,48 +87,10 @@ pub fn resolve_service(ctx: &Context, service: &str) -> Result<String> {
     );
 }
 
-/// Validates that all provided services have existing compose directories.
-///
-/// # Arguments
-///
-/// * `ctx` - The application context.
-/// * `services` - A list of service names to validate.
-///
-/// # Errors
-///
-/// Returns an error if any of the service directories do not exist.
-pub fn validate_compose_dirs(ctx: &Context, services: &[String]) -> Result<()> {
-    verbose!("Validating compose directories for: {:?}", services);
-    let mut missing = Vec::new();
-
-    for service in services {
-        let bare = get_bare_name(service);
-        let dir = get_compose_dir(ctx, bare);
-        verbose!("Checking directory for '{}': {}", bare, dir.display());
-        if !dir.exists() {
-            missing.push((bare.to_string(), dir));
-        }
-    }
-
-    if !missing.is_empty() {
-        let msg = missing
-            .iter()
-            .map(|(name, path)| format!("  - '{}' (expected at {})", name, path.display()))
-            .collect::<Vec<_>>()
-            .join("\n");
-        bail!(
-            "Compose directory not found for the following services:\n{}\n\nEnsure the service name matches an existing directory under {}",
-            msg,
-            ctx.compose_base.display()
-        );
-    }
-
-    Ok(())
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
+    use super::super::service::{get_bare_name, get_compose_dir};
     use std::fs;
     use std::path::{Path, PathBuf};
 
@@ -171,48 +132,6 @@ mod tests {
         fn drop(&mut self) {
             let _ = fs::remove_dir_all(&self.base);
         }
-    }
-
-    #[test]
-    fn test_validate_compose_dirs_exists() {
-        let test_dir = TestDir::new("validate-exists");
-        test_dir.create_dir("myapp");
-        let ctx = test_context(test_dir.path());
-        let result = validate_compose_dirs(&ctx, &["myapp".to_string()]);
-        assert!(result.is_ok());
-    }
-
-    #[test]
-    fn test_validate_compose_dirs_not_exists() {
-        let test_dir = TestDir::new("validate-not-exists");
-        let ctx = test_context(test_dir.path());
-        let result = validate_compose_dirs(&ctx, &["nonexistent".to_string()]);
-        assert!(result.is_err());
-        let err = result.unwrap_err().to_string();
-        assert!(err.contains("nonexistent"));
-        assert!(err.contains("not found"));
-    }
-
-    #[test]
-    fn test_validate_compose_dirs_multiple() {
-        let test_dir = TestDir::new("validate-multiple");
-        test_dir.create_dir("app1");
-        test_dir.create_dir("app2");
-        let ctx = test_context(test_dir.path());
-        let result = validate_compose_dirs(&ctx, &["app1".to_string(), "app2".to_string()]);
-        assert!(result.is_ok());
-    }
-
-    #[test]
-    fn test_validate_compose_dirs_partial_missing() {
-        let test_dir = TestDir::new("validate-partial");
-        test_dir.create_dir("app1");
-        let ctx = test_context(test_dir.path());
-        let result = validate_compose_dirs(&ctx, &["app1".to_string(), "app2".to_string()]);
-        assert!(result.is_err());
-        let err = result.unwrap_err().to_string();
-        assert!(err.contains("app2"));
-        assert!(!err.contains("app1"));
     }
 
     #[test]

@@ -3,7 +3,16 @@
 use crate::core::Context;
 use crate::verbose;
 use anyhow::{bail, Result};
+use serde::Deserialize;
 use std::process::Command;
+
+#[derive(Debug, Deserialize)]
+struct SystemdUnit {
+    unit: String,
+    active: String,
+    sub: String,
+    description: String,
+}
 
 /// Lists dependencies for a given unit or the default target.
 pub fn list_dependencies(ctx: &Context, unit: Option<&str>) -> Result<()> {
@@ -53,6 +62,17 @@ pub fn daemon_reload(ctx: &Context) -> Result<()> {
     run_systemctl(ctx, "daemon-reload", None)
 }
 
+/// Returns a Command pre-configured for systemctl (either root or user).
+fn systemctl_cmd(ctx: &Context) -> std::process::Command {
+    let mut cmd = Command::new("systemctl");
+    // CRITICAL: Ensure consistent output regardless of user language
+    cmd.env("LC_ALL", "C");
+    if !ctx.is_root {
+        cmd.arg("--user");
+    }
+    cmd
+}
+
 /// Returns the active state of a unit.
 pub fn get_unit_state(ctx: &Context, unit: &str) -> Result<String> {
     verbose!("Getting state for unit: {}", unit);
@@ -98,14 +118,12 @@ pub struct UnitInfo {
 
 /// Lists units matching an optional pattern.
 ///
-/// Uses structured `systemctl show` output instead of parsing formatted text,
-/// making this robust against output format changes.
+/// Uses JSON output from systemctl for robust parsing.
 pub fn list_units(ctx: &Context, pattern: Option<&str>) -> Result<Vec<UnitInfo>> {
     verbose!("Listing units matching pattern: {:?}", pattern);
 
-    // First, get the list of unit names using plain output
     let mut cmd = systemctl_cmd(ctx);
-    cmd.args(["list-units", "--no-pager", "--no-legend", "--plain"]);
+    cmd.arg("list-units").arg("--output=json");
 
     if let Some(p) = pattern {
         cmd.arg(format!("{}*", p));
@@ -117,72 +135,15 @@ pub fn list_units(ctx: &Context, pattern: Option<&str>) -> Result<Vec<UnitInfo>>
         bail!("Failed to list units: {}", stderr.trim());
     }
 
-    let stdout = String::from_utf8_lossy(&output.stdout);
-    let unit_names: Vec<&str> = stdout
-        .lines()
-        .filter_map(|line| line.split_whitespace().next())
-        .collect();
+    // Parse JSON directly
+    let units: Vec<SystemdUnit> = serde_json::from_slice(&output.stdout)?;
 
-    if unit_names.is_empty() {
-        verbose!("No units found matching pattern");
-        return Ok(Vec::new());
-    }
-
-    verbose!("Found {} units, fetching details...", unit_names.len());
-
-    // Get structured properties for all units at once
-    let mut cmd = systemctl_cmd(ctx);
-    cmd.args(["show", "--property=Id,ActiveState,SubState,Description"]);
-    for name in &unit_names {
-        cmd.arg(name);
-    }
-
-    let output = cmd.output()?;
-    if !output.status.success() {
-        let stderr = String::from_utf8_lossy(&output.stderr);
-        bail!("Failed to get unit properties: {}", stderr.trim());
-    }
-
-    // Parse the structured output (property blocks separated by blank lines)
-    let stdout = String::from_utf8_lossy(&output.stdout);
-    let units = stdout
-        .split("\n\n")
-        .filter(|block| !block.trim().is_empty())
-        .filter_map(parse_unit_properties)
-        .collect();
-
-    Ok(units)
-}
-
-/// Parses a block of key=value properties into a UnitInfo.
-fn parse_unit_properties(block: &str) -> Option<UnitInfo> {
-    let mut name = String::new();
-    let mut active = String::new();
-    let mut sub = String::new();
-    let mut description = String::new();
-
-    for line in block.lines() {
-        if let Some((key, value)) = line.split_once('=') {
-            match key {
-                "Id" => name = value.to_string(),
-                "ActiveState" => active = value.to_string(),
-                "SubState" => sub = value.to_string(),
-                "Description" => description = value.to_string(),
-                _ => {}
-            }
-        }
-    }
-
-    if name.is_empty() {
-        return None;
-    }
-
-    Some(UnitInfo {
-        name,
-        active,
-        sub,
-        description,
-    })
+    Ok(units.into_iter().map(|u| UnitInfo {
+        name: u.unit,
+        active: u.active,
+        sub: u.sub,
+        description: u.description
+    }).collect())
 }
 
 fn run_systemctl(ctx: &Context, action: &str, unit: Option<&str>) -> Result<()> {
@@ -214,14 +175,4 @@ fn run_systemctl(ctx: &Context, action: &str, unit: Option<&str>) -> Result<()> 
     }
 
     Ok(())
-}
-
-/// Returns a Command pre-configured for systemctl (either root or user).
-fn systemctl_cmd(ctx: &Context) -> std::process::Command {
-    let mut cmd = Command::new("systemctl");
-    if !ctx.is_root {
-        cmd.arg("--user");
-    }
-
-    cmd
 }

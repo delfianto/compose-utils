@@ -1,33 +1,27 @@
-//! Logic for the `pull` command.
-
 use crate::core::Context;
-use anyhow::Result;
-use colored::*;
+use crate::systemd::service::{get_bare_name, get_compose_dir};
+use anyhow::{Context as _, Result};
+use std::process::Command;
 
-/// Executes the `pull` command to download Docker images for specified services.
 pub async fn run_pull(ctx: &Context, services: &[String]) -> Result<()> {
-    let docker = crate::docker::connect_docker(ctx)?;
-
     let services = crate::systemd::discovery::resolve_services(ctx, services)?;
-    crate::systemd::discovery::validate_compose_dirs(ctx, &services)?;
 
-    for service in &services {
-        let bare = crate::systemd::service::get_bare_name(service);
-        let dir = crate::systemd::service::get_compose_dir(ctx, bare);
+    for service in services {
+        let bare = get_bare_name(&service);
+        let dir = get_compose_dir(ctx, bare);
 
-        println!("{} Pulling images for '{}'...", ">>".blue(), bare);
+        println!(">> Pulling images for '{}'...", bare);
 
-        let images = crate::compose::project::get_required_images(&dir)?;
-        if images.is_empty() {
-            println!("No images defined in compose file for '{}'", bare);
-            continue;
-        }
+        let status = Command::new("docker")
+            .arg("compose")
+            .arg("pull")
+            .current_dir(&dir)
+            .status()
+            .with_context(|| format!("Failed to execute docker compose pull in {:?}", dir))?;
 
-        for image in &images {
-            crate::docker::images::pull_image_with_progress(&docker, image).await?;
+        if !status.success() {
+            eprintln!("Warning: Failed to pull images for {}", bare);
         }
     }
-
-    println!("{} All images pulled successfully.", "OK".green());
     Ok(())
 }

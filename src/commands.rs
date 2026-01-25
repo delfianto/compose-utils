@@ -8,7 +8,7 @@ pub mod deps;
 pub mod ps;
 pub mod pull;
 pub mod service;
-pub mod system;
+
 pub mod update;
 
 pub use pull::run_pull;

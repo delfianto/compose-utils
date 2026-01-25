@@ -1,9 +1,6 @@
 //! High-level command implementations for managing systemd compose services.
 
-use crate::compose::project::get_required_images;
 use crate::core::Context;
-use crate::docker::connect_docker;
-use crate::docker::images::pull_image_with_progress;
 use crate::systemd::discovery::{resolve_service, resolve_services};
 use crate::systemd::journal::{JournalReader, LogEntry};
 use crate::systemd::service::{get_bare_name, get_compose_dir, normalize_unit_name};
@@ -12,7 +9,6 @@ use colored::Colorize;
 
 /// Executes the `start` (or `up`) command with smart image pulling.
 pub async fn run_start(ctx: &Context, names: &[String], deps_path: Option<String>) -> Result<()> {
-    let docker = connect_docker(ctx)?;
     let services = resolve_services(ctx, names)?;
 
     if let Some(path) = deps_path {
@@ -45,32 +41,7 @@ pub async fn run_start(ctx: &Context, names: &[String], deps_path: Option<String
 
     for name in services {
         let bare = get_bare_name(&name);
-
-        let compose_dir = get_compose_dir(ctx, bare);
         let unit_name = normalize_unit_name(ctx, bare);
-        let images = get_required_images(&compose_dir)?;
-
-        if !images.is_empty() {
-            println!("Checking images for {}...", bare);
-            let mut missing = Vec::new();
-            for image in &images {
-                match docker.inspect_image(image).await {
-                    Ok(_) => println!("  {} - present", image),
-                    Err(_) => {
-                        println!("  {} - missing", image);
-                        missing.push(image.clone());
-                    }
-                }
-            }
-
-            if !missing.is_empty() {
-                println!();
-                for image in &missing {
-                    pull_image_with_progress(&docker, image).await?;
-                }
-                println!();
-            }
-        }
 
         println!("Starting {}...", unit_name);
         crate::systemd::manager::start_unit(ctx, &unit_name)?;
@@ -100,27 +71,11 @@ pub async fn run_stop(ctx: &Context, names: &[String]) -> Result<()> {
 
 /// Executes the `restart` (or `reup`) command.
 pub async fn run_restart(ctx: &Context, names: &[String]) -> Result<()> {
-    let docker = connect_docker(ctx)?;
     let services = resolve_services(ctx, names)?;
 
     for name in services {
         let bare = get_bare_name(&name);
-
-        let compose_dir = get_compose_dir(ctx, bare);
         let unit_name = normalize_unit_name(ctx, bare);
-
-        let images = get_required_images(&compose_dir)?;
-        if !images.is_empty() {
-            let mut missing = Vec::new();
-            for image in &images {
-                if docker.inspect_image(image).await.is_err() {
-                    missing.push(image.clone());
-                }
-            }
-            for image in &missing {
-                pull_image_with_progress(&docker, image).await?;
-            }
-        }
 
         println!("Restarting {}...", unit_name);
         crate::systemd::manager::restart_unit(ctx, &unit_name)?;
