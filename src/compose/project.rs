@@ -1,9 +1,11 @@
 //! Logic for discovering Docker Compose projects and extracting information from them.
 
-use super::env::{load_env_file, resolve_env_vars};
+use super::env::{find_unresolved_vars, load_env_file, resolve_env_vars};
 use super::types::DockerCompose;
 use crate::core::COMPOSE_FILES;
+use crate::verbose;
 use anyhow::{Context, Result};
+use colored::Colorize;
 use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -18,12 +20,15 @@ use std::path::{Path, PathBuf};
 ///
 /// Returns [`Some(PathBuf)`] if a file is found, otherwise [`None`].
 pub fn find_compose_file(dir: &Path) -> Option<PathBuf> {
+    verbose!("Searching for compose file in: {}", dir.display());
     for name in COMPOSE_FILES {
         let path = dir.join(name);
         if path.exists() {
+            verbose!("Found compose file: {}", path.display());
             return Some(path);
         }
     }
+    verbose!("No compose file found in: {}", dir.display());
     None
 }
 
@@ -46,13 +51,16 @@ pub fn find_compose_file(dir: &Path) -> Option<PathBuf> {
 /// - The compose file or `.env` file cannot be read.
 /// - The YAML content is malformed.
 pub fn get_required_images(project_dir: &Path) -> Result<Vec<String>> {
+    verbose!("Analyzing project images in: {}", project_dir.display());
     let compose_file = find_compose_file(project_dir)
         .ok_or_else(|| anyhow::anyhow!("No compose file found in {:?}", project_dir))?;
     let env_file = project_dir.join(".env");
 
     let env_vars = if env_file.exists() {
+        verbose!("Loading env file: {}", env_file.display());
         load_env_file(&env_file)?
     } else {
+        verbose!("No env file found at: {}", env_file.display());
         HashMap::new()
     };
 
@@ -64,9 +72,28 @@ pub fn get_required_images(project_dir: &Path) -> Result<Vec<String>> {
 
     let mut images = Vec::new();
     if let Some(services) = compose.services {
-        for (_, service) in services {
+        for (service_name, service) in services {
             if let Some(raw_image) = service.image {
                 let resolved = resolve_env_vars(&raw_image, &env_vars);
+                verbose!(
+                    "Service '{}' uses image: '{}' (resolved from '{}')",
+                    service_name,
+                    resolved,
+                    raw_image
+                );
+
+                // Warn about any unresolved environment variables
+                let unresolved = find_unresolved_vars(&resolved);
+                for var in &unresolved {
+                    eprintln!(
+                        "{} Unresolved variable ${} in image '{}' for service '{}'",
+                        "Warning:".yellow(),
+                        var,
+                        resolved,
+                        service_name
+                    );
+                }
+
                 images.push(resolved);
             }
         }

@@ -1,5 +1,6 @@
 //! Logic for interacting with Docker images, including pulling with progress reporting.
 
+use crate::verbose;
 use anyhow::{Context as _, Result};
 use bollard::query_parameters::CreateImageOptions;
 use bollard::Docker;
@@ -24,6 +25,7 @@ pub async fn pull_image_with_progress(docker: &Docker, image: &str) -> Result<()
     let (repo, tag) = parse_image_reference(image);
 
     println!("Pulling {}:{}...", repo, tag);
+    verbose!("Initiating pull for image: {}:{}", repo, tag);
 
     let options = CreateImageOptions {
         from_image: Some(repo.to_string()),
@@ -78,10 +80,12 @@ pub async fn pull_image_with_progress(docker: &Docker, image: &str) -> Result<()
                 }
             }
             Err(e) => {
+                verbose!("Failed to pull image: {:?}", e);
                 return Err(e).context(format!("Failed to pull {}", image));
             }
         }
     }
+    verbose!("Successfully pulled image: {}:{}", repo, tag);
 
     Ok(())
 }
@@ -110,9 +114,16 @@ pub fn parse_image_reference(image: &str) -> (&str, &str) {
 /// * `docker` - The Docker client.
 /// * `image` - The image reference to inspect.
 pub async fn get_image_digest(docker: &Docker, image: &str) -> Option<String> {
+    verbose!("Inspecting image for digest: {}", image);
     match docker.inspect_image(image).await {
-        Ok(info) => info.id,
-        Err(_) => None,
+        Ok(info) => {
+            verbose!("Found image digest: {:?}", info.id);
+            info.id
+        }
+        Err(e) => {
+            verbose!("Failed to inspect image {}: {:?}", image, e);
+            None
+        }
     }
 }
 

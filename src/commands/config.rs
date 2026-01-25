@@ -1,8 +1,8 @@
 //! Logic for viewing and updating the tool's configuration (`compose.env`).
 
 use crate::core::{
-    read_env_file, validate_acme_server, validate_directory, validate_docker_host,
-    validate_domain, validate_email, Context, CONFIG_KEYS,
+    read_env_file, validate_acme_server, validate_directory, validate_docker_host, validate_domain,
+    validate_email, Context, CONFIG_KEYS,
 };
 use anyhow::{Context as _, Result};
 use clap::Args;

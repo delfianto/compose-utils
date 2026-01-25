@@ -1,10 +1,20 @@
 //! Input validation utilities for configuration values.
 
 use anyhow::{bail, Context as _, Result};
+use once_cell::sync::Lazy;
 use regex::Regex;
 use std::net::ToSocketAddrs;
 use std::path::Path;
 use url::Url;
+
+/// Regex for validating domain names (RFC 1035 compliant).
+static DOMAIN_RE: Lazy<Regex> = Lazy::new(|| {
+    Regex::new(r"^([a-zA-Z0-9]([a-zA-Z0-9\-]{0,61}[a-zA-Z0-9])?\.)+[a-zA-Z]{2,}$").unwrap()
+});
+
+/// Regex for validating email addresses (simplified RFC 5322).
+static EMAIL_RE: Lazy<Regex> =
+    Lazy::new(|| Regex::new(r"^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$").unwrap());
 
 /// Ensures that a path refers to an existing directory.
 pub fn validate_directory(path: &str, field_name: &str) -> Result<()> {
@@ -20,10 +30,7 @@ pub fn validate_directory(path: &str, field_name: &str) -> Result<()> {
 
 /// Validates that a string resembles a valid domain name.
 pub fn validate_domain(domain: &str) -> Result<()> {
-    let domain_regex =
-        Regex::new(r"^([a-zA-Z0-9]([a-zA-Z0-9\-]{0,61}[a-zA-Z0-9])?\.)+[a-zA-Z]{2,}$").unwrap();
-
-    if !domain_regex.is_match(domain) {
+    if !DOMAIN_RE.is_match(domain) {
         bail!(
             "TRAEFIK_ACME_DOMAIN must be a valid domain name (e.g., example.com): {}",
             domain
@@ -34,9 +41,7 @@ pub fn validate_domain(domain: &str) -> Result<()> {
 
 /// Validates that a string is a correctly formatted email address.
 pub fn validate_email(email: &str) -> Result<()> {
-    let email_regex = Regex::new(r"^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$").unwrap();
-
-    if !email_regex.is_match(email) {
+    if !EMAIL_RE.is_match(email) {
         bail!(
             "TRAEFIK_ACME_EMAIL must be a valid email address: {}",
             email

@@ -2,15 +2,18 @@
 
 use super::service::run_restart;
 use crate::core::Context;
+use crate::verbose;
 use anyhow::Result;
 use colored::*;
 use std::collections::HashMap;
 
 /// Executes the `update` command to pull images and restart services if changes are detected.
 pub async fn run_update(ctx: &Context, services: &[String]) -> Result<()> {
+    verbose!("Starting update process for services: {:?}", services);
     let docker = crate::docker::connect_docker(ctx)?;
 
     let services = crate::systemd::discovery::resolve_services(ctx, services)?;
+    verbose!("Resolved services to update: {:?}", services);
     crate::systemd::discovery::validate_compose_dirs(ctx, &services)?;
 
     let mut services_to_restart = Vec::new();
@@ -20,16 +23,25 @@ pub async fn run_update(ctx: &Context, services: &[String]) -> Result<()> {
         let dir = crate::systemd::service::get_compose_dir(ctx, bare);
 
         println!("{} Checking for updates: '{}'...", ">>".blue(), bare);
+        verbose!(
+            "Processing service '{}' in directory: {}",
+            bare,
+            dir.display()
+        );
 
         let images = crate::compose::project::get_required_images(&dir)?;
         if images.is_empty() {
             println!("No images defined in compose file for '{}'", bare);
+            verbose!("Skipping '{}': No images found", bare);
             continue;
         }
+
+        verbose!("Images for '{}': {:?}", bare, images);
 
         let mut pre_pull_hashes: HashMap<String, Option<String>> = HashMap::new();
         for image in &images {
             let hash = crate::docker::images::get_image_digest(&docker, image).await;
+            verbose!("Current digest for {}: {:?}", image, hash);
             pre_pull_hashes.insert(image.clone(), hash);
         }
 
@@ -41,6 +53,7 @@ pub async fn run_update(ctx: &Context, services: &[String]) -> Result<()> {
         for image in &images {
             let old_hash = pre_pull_hashes.get(image).and_then(|h| h.as_ref());
             let new_hash = crate::docker::images::get_image_digest(&docker, image).await;
+            verbose!("Post-pull digest for {}: {:?}", image, new_hash);
 
             match (old_hash, new_hash.as_ref()) {
                 (Some(old), Some(new)) if old != new => {
@@ -51,6 +64,7 @@ pub async fn run_update(ctx: &Context, services: &[String]) -> Result<()> {
                         shorten_hash(old),
                         shorten_hash(new)
                     );
+                    verbose!("Image change detected for {}", image);
                     updated = true;
                 }
                 (None, Some(new)) => {
@@ -60,13 +74,17 @@ pub async fn run_update(ctx: &Context, services: &[String]) -> Result<()> {
                         image,
                         shorten_hash(new)
                     );
+                    verbose!("New image detected for {}", image);
                     updated = true;
                 }
-                _ => {}
+                _ => {
+                    verbose!("No change for image {}", image);
+                }
             }
         }
 
         if updated {
+            verbose!("Service '{}' marked for restart", bare);
             services_to_restart.push(service.clone());
         } else {
             println!("{} '{}' is already up to date.", "OK".green(), bare);

@@ -1,11 +1,13 @@
 //! Logic for managing systemd units via the systemctl CLI.
 
 use crate::core::Context;
+use crate::verbose;
 use anyhow::{bail, Result};
 use std::process::Command;
 
 /// Lists dependencies for a given unit or the default target.
 pub fn list_dependencies(ctx: &Context, unit: Option<&str>) -> Result<()> {
+    verbose!("Listing dependencies for: {:?}", unit);
     let mut cmd = systemctl_cmd(ctx);
     cmd.arg("list-dependencies").arg("--after").arg("--reverse");
 
@@ -15,17 +17,20 @@ pub fn list_dependencies(ctx: &Context, unit: Option<&str>) -> Result<()> {
         cmd.arg("docker.service");
     }
 
-    let status = cmd.status()?;
+    let output = cmd.output()?;
 
-    if !status.success() {
-        bail!("Failed to list dependencies via systemctl");
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        bail!("Failed to list dependencies: {}", stderr.trim());
     }
 
+    print!("{}", String::from_utf8_lossy(&output.stdout));
     Ok(())
 }
 
 /// Shows the status of a specific unit.
 pub fn show_status(ctx: &Context, unit: &str) -> Result<()> {
+    verbose!("Showing status for unit: {}", unit);
     let mut cmd = systemctl_cmd(ctx);
     cmd.arg("status").arg(unit).arg("--lines=0");
 
@@ -50,6 +55,7 @@ pub fn daemon_reload(ctx: &Context) -> Result<()> {
 
 /// Returns the active state of a unit.
 pub fn get_unit_state(ctx: &Context, unit: &str) -> Result<String> {
+    verbose!("Getting state for unit: {}", unit);
     let mut cmd = systemctl_cmd(ctx);
     let output = cmd
         .arg("show")
@@ -59,7 +65,8 @@ pub fn get_unit_state(ctx: &Context, unit: &str) -> Result<String> {
         .output()?;
 
     if !output.status.success() {
-        bail!("Failed to get state for {}", unit);
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        bail!("Failed to get state for {}: {}", unit, stderr.trim());
     }
 
     Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
@@ -90,42 +97,95 @@ pub struct UnitInfo {
 }
 
 /// Lists units matching an optional pattern.
+///
+/// Uses structured `systemctl show` output instead of parsing formatted text,
+/// making this robust against output format changes.
 pub fn list_units(ctx: &Context, pattern: Option<&str>) -> Result<Vec<UnitInfo>> {
+    verbose!("Listing units matching pattern: {:?}", pattern);
+    // First, get the list of unit names using plain output
     let mut cmd = systemctl_cmd(ctx);
-    cmd.args(["list-units", "--no-pager", "--no-legend", "--full"]);
+    cmd.args(["list-units", "--no-pager", "--no-legend", "--plain"]);
 
     if let Some(p) = pattern {
         cmd.arg(format!("{}*", p));
     }
 
     let output = cmd.output()?;
-
     if !output.status.success() {
-        bail!("Failed to list units via systemctl");
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        bail!("Failed to list units: {}", stderr.trim());
     }
 
     let stdout = String::from_utf8_lossy(&output.stdout);
-    let units = stdout
+    let unit_names: Vec<&str> = stdout
         .lines()
-        .filter_map(|line| {
-            let parts: Vec<&str> = line.split_whitespace().collect();
-            if parts.len() >= 4 {
-                Some(UnitInfo {
-                    name: parts[0].to_string(),
-                    active: parts[2].to_string(),
-                    sub: parts[3].to_string(),
-                    description: parts[4..].join(" "),
-                })
-            } else {
-                None
-            }
-        })
+        .filter_map(|line| line.split_whitespace().next())
+        .collect();
+
+    if unit_names.is_empty() {
+        verbose!("No units found matching pattern");
+        return Ok(Vec::new());
+    }
+
+    verbose!("Found {} units, fetching details...", unit_names.len());
+
+    // Get structured properties for all units at once
+    let mut cmd = systemctl_cmd(ctx);
+    cmd.args(["show", "--property=Id,ActiveState,SubState,Description"]);
+    for name in &unit_names {
+        cmd.arg(name);
+    }
+
+    let output = cmd.output()?;
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        bail!("Failed to get unit properties: {}", stderr.trim());
+    }
+
+    // Parse the structured output (property blocks separated by blank lines)
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let units = stdout
+        .split("\n\n")
+        .filter(|block| !block.trim().is_empty())
+        .filter_map(parse_unit_properties)
         .collect();
 
     Ok(units)
 }
 
+/// Parses a block of key=value properties into a UnitInfo.
+fn parse_unit_properties(block: &str) -> Option<UnitInfo> {
+    let mut name = String::new();
+    let mut active = String::new();
+    let mut sub = String::new();
+    let mut description = String::new();
+
+    for line in block.lines() {
+        if let Some((key, value)) = line.split_once('=') {
+            match key {
+                "Id" => name = value.to_string(),
+                "ActiveState" => active = value.to_string(),
+                "SubState" => sub = value.to_string(),
+                "Description" => description = value.to_string(),
+                _ => {}
+            }
+        }
+    }
+
+    if name.is_empty() {
+        return None;
+    }
+
+    Some(UnitInfo {
+        name,
+        active,
+        sub,
+        description,
+    })
+}
+
 fn run_systemctl(ctx: &Context, action: &str, unit: Option<&str>) -> Result<()> {
+    verbose!("Running systemctl {} {:?}", action, unit);
     let mut cmd = systemctl_cmd(ctx);
     cmd.arg(action);
 
@@ -133,13 +193,22 @@ fn run_systemctl(ctx: &Context, action: &str, unit: Option<&str>) -> Result<()> 
         cmd.arg(u);
     }
 
-    let status = cmd.status()?;
+    let output = cmd.output()?;
 
-    if !status.success() {
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        let stderr = stderr.trim();
+
         if let Some(u) = unit {
-            bail!("Failed to {} {}: systemctl exited with error", action, u);
-        } else {
+            if stderr.is_empty() {
+                bail!("Failed to {} {}: systemctl exited with error", action, u);
+            } else {
+                bail!("Failed to {} {}: {}", action, u, stderr);
+            }
+        } else if stderr.is_empty() {
             bail!("Failed to {}: systemctl exited with error", action);
+        } else {
+            bail!("Failed to {}: {}", action, stderr);
         }
     }
 

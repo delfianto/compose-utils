@@ -1,6 +1,8 @@
 //! Logic for reading and following systemd journal logs.
 
 use anyhow::{Context as _, Result};
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
 use std::time::{Duration, UNIX_EPOCH};
 use systemd::journal::{Journal, OpenOptions};
 
@@ -49,10 +51,28 @@ impl JournalReader {
     }
 
     /// Follows the journal for a unit, calling the provided callback for each new entry.
+    ///
+    /// The follow loop will exit gracefully when:
+    /// - The callback returns `false`
+    /// - The user presses Ctrl+C (SIGINT)
+    ///
+    /// # Arguments
+    ///
+    /// * `unit` - The systemd unit to follow logs for.
+    /// * `callback` - A function called for each new log entry. Return `false` to stop following.
     pub fn follow_unit<F>(&mut self, unit: &str, mut callback: F) -> Result<()>
     where
         F: FnMut(&LogEntry) -> bool,
     {
+        // Set up Ctrl+C handler for graceful exit
+        let interrupted = Arc::new(AtomicBool::new(false));
+        let interrupted_clone = Arc::clone(&interrupted);
+
+        ctrlc::set_handler(move || {
+            interrupted_clone.store(true, Ordering::SeqCst);
+        })
+        .context("Failed to set Ctrl+C handler")?;
+
         // Matches should already be applied by logs_for_unit, but let's ensure it.
         // match_add is idempotent/cumulative so it doesn't hurt.
         self.apply_unit_matches(unit)?;
@@ -62,14 +82,29 @@ impl JournalReader {
         self.journal.seek_tail()?;
 
         loop {
-            // Wait for new data (blocks)
+            // Check for interrupt before waiting
+            if interrupted.load(Ordering::SeqCst) {
+                return Ok(());
+            }
+
+            // Wait for new data (blocks for up to 1 second)
             self.journal.wait(Some(Duration::from_secs(1)))?;
+
+            // Check for interrupt after waiting
+            if interrupted.load(Ordering::SeqCst) {
+                return Ok(());
+            }
 
             while self.journal.next()? > 0 {
                 if let Some(entry) = self.read_entry() {
                     if !callback(&entry) {
                         return Ok(());
                     }
+                }
+
+                // Check for interrupt while processing entries
+                if interrupted.load(Ordering::SeqCst) {
+                    return Ok(());
                 }
             }
         }

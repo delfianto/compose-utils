@@ -1,6 +1,7 @@
 //! Logic for interacting with systemd services and resolving service names.
 
 use crate::core::Context;
+use crate::verbose;
 use std::path::PathBuf;
 
 /// Converts a project name to its corresponding directory path.
@@ -25,6 +26,11 @@ pub fn name_to_dir_path(ctx: &Context, name: &str) -> String {
     let converted = name.replace('-', "/");
     let converted_path = ctx.compose_base.join(&converted);
     if converted_path.exists() {
+        verbose!(
+            "Resolved flat name '{}' to nested path '{}'",
+            name,
+            converted
+        );
         return converted;
     }
 
@@ -71,7 +77,7 @@ pub fn normalize_unit_name(ctx: &Context, name: &str) -> String {
     let potential_dir = name_to_dir_path(ctx, bare);
     let project_exists = ctx.compose_base.join(&potential_dir).exists();
 
-    if project_exists || bare.contains('/') || name.starts_with("compose@") {
+    let normalized = if project_exists || bare.contains('/') || name.starts_with("compose@") {
         let normalized = bare.replace('/', "-");
         format!("compose@{}.service", normalized)
     } else {
@@ -81,7 +87,12 @@ pub fn normalize_unit_name(ctx: &Context, name: &str) -> String {
         } else {
             format!("{}.service", inner)
         }
+    };
+
+    if normalized != name {
+        verbose!("Normalized '{}' -> '{}'", name, normalized);
     }
+    normalized
 }
 
 /// Extracts the bare project name from a service unit string.

@@ -43,7 +43,13 @@ pub struct Context {
 /// - Required directories cannot be determined.
 /// - The environment file cannot be read (if it exists).
 pub fn get_context() -> Result<Context> {
+    use crate::verbose;
+
     let is_root = geteuid().is_root();
+    verbose!(
+        "Privilege mode: {}",
+        if is_root { "root" } else { "rootless" }
+    );
 
     if is_root {
         let _ = detect_and_validate_mode(
@@ -62,13 +68,22 @@ pub fn get_context() -> Result<Context> {
 
         let docker_host = config.get("DOCKER_HOST").cloned();
 
-        return Ok(Context {
+        let ctx = Context {
             is_root: true,
             systemd_dir: PathBuf::from(constants::ROOT_SYSTEMD_DIR),
             compose_base,
             env_file,
             docker_host,
-        });
+        };
+
+        verbose!("Systemd dir: {}", ctx.systemd_dir.display());
+        verbose!("Compose base: {}", ctx.compose_base.display());
+        verbose!("Env file: {}", ctx.env_file.display());
+        if let Some(ref host) = ctx.docker_host {
+            verbose!("Docker host: {}", host);
+        }
+
+        return Ok(ctx);
     }
 
     let base_dirs = BaseDirs::new().context("Could not determine user home directory")?;
@@ -96,13 +111,22 @@ pub fn get_context() -> Result<Context> {
 
     let docker_host = config.get("DOCKER_HOST").cloned();
 
-    Ok(Context {
+    let ctx = Context {
         is_root: false,
         systemd_dir: xdg_config.join(constants::USER_SYSTEMD_DIR_REL),
         compose_base,
         env_file,
         docker_host,
-    })
+    };
+
+    verbose!("Systemd dir: {}", ctx.systemd_dir.display());
+    verbose!("Compose base: {}", ctx.compose_base.display());
+    verbose!("Env file: {}", ctx.env_file.display());
+    if let Some(ref host) = ctx.docker_host {
+        verbose!("Docker host: {}", host);
+    }
+
+    Ok(ctx)
 }
 
 /// Reads a simple KEY=VALUE environment file into a [`HashMap`].

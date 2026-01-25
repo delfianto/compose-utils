@@ -1,10 +1,15 @@
 //! Utilities for handling environment variables and `.env` files.
 
 use anyhow::Result;
+use once_cell::sync::Lazy;
 use regex::Regex;
 use std::collections::HashMap;
 use std::fs;
 use std::path::Path;
+
+/// Regex for matching environment variable placeholders ($VAR or ${VAR}).
+static ENV_VAR_RE: Lazy<Regex> =
+    Lazy::new(|| Regex::new(r"\$\{?([a-zA-Z_][a-zA-Z0-9_]*)\}?").unwrap());
 
 /// Loads environment variables from a specified `.env` file.
 ///
@@ -46,14 +51,29 @@ pub fn load_env_file(path: &Path) -> Result<HashMap<String, String>> {
 /// * `text` - The string containing potential placeholders.
 /// * `vars` - A map containing variable keys and their replacement values.
 pub fn resolve_env_vars(text: &str, vars: &HashMap<String, String>) -> String {
-    let re = Regex::new(r"\$\{?([a-zA-Z_][a-zA-Z0-9_]*)\}?").unwrap();
-    re.replace_all(text, |caps: &regex::Captures| {
-        let key = &caps[1];
-        vars.get(key)
-            .cloned()
-            .unwrap_or_else(|| caps[0].to_string())
-    })
-    .to_string()
+    ENV_VAR_RE
+        .replace_all(text, |caps: &regex::Captures| {
+            let key = &caps[1];
+            vars.get(key)
+                .cloned()
+                .unwrap_or_else(|| caps[0].to_string())
+        })
+        .to_string()
+}
+
+/// Finds environment variable placeholders in a string that were not resolved.
+///
+/// Returns a list of variable names (without the `$` or `${}` syntax) that
+/// still appear as placeholders in the text.
+///
+/// # Arguments
+///
+/// * `text` - The string to check for unresolved placeholders.
+pub fn find_unresolved_vars(text: &str) -> Vec<String> {
+    ENV_VAR_RE
+        .captures_iter(text)
+        .map(|caps| caps[1].to_string())
+        .collect()
 }
 
 #[cfg(test)]

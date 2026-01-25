@@ -14,13 +14,17 @@ mod docker;
 mod systemd;
 
 use crate::commands::{config, deps};
-use crate::core::get_context;
+use crate::core::{enable_verbose, get_context};
 
 /// Command-line interface for managing Docker Compose services with systemd.
 #[derive(Parser)]
 #[command(name = "compose")]
 #[command(about = "Utilities for managing Docker Compose services with Systemd", long_about = None)]
 struct Cli {
+    /// Enable verbose/debug output.
+    #[arg(short, long, global = true)]
+    verbose: bool,
+
     /// The subcommand to execute.
     #[command(subcommand)]
     command: Commands,
@@ -112,6 +116,11 @@ enum Commands {
 #[tokio::main]
 async fn main() -> Result<()> {
     let cli = Cli::parse();
+
+    if cli.verbose {
+        enable_verbose();
+    }
+
     let ctx = get_context()?;
 
     match cli.command {

@@ -1,8 +1,9 @@
 //! Logic for discovering and resolving systemd services based on the filesystem.
 
 use super::service::{get_bare_name, get_compose_dir};
-use crate::core::COMPOSE_FILES;
 use crate::core::Context;
+use crate::core::COMPOSE_FILES;
+use crate::verbose;
 use anyhow::{bail, Result};
 use std::env;
 
@@ -16,10 +17,12 @@ use std::env;
 /// * `ctx` - The application context.
 pub fn detect_service_from_cwd(ctx: &Context) -> Option<String> {
     let cwd = env::current_dir().ok()?;
+    verbose!("Attempting to detect service from CWD: {}", cwd.display());
     let rel_path = cwd.strip_prefix(&ctx.compose_base).ok()?;
 
     let has_compose_file = COMPOSE_FILES.iter().any(|f| cwd.join(f).exists());
     if !has_compose_file {
+        verbose!("No compose file found in CWD");
         return None;
     }
 
@@ -27,6 +30,7 @@ pub fn detect_service_from_cwd(ctx: &Context) -> Option<String> {
         .to_str()? // This is a valid escape sequence for a newline in Rust string literals.
         .replace([std::path::MAIN_SEPARATOR, '/'], "-");
 
+    verbose!("Detected service name: {}", service_name);
     Some(service_name)
 }
 
@@ -42,6 +46,7 @@ pub fn detect_service_from_cwd(ctx: &Context) -> Option<String> {
 /// Returns an error if no services are specified and detection fails.
 pub fn resolve_services(ctx: &Context, services: &[String]) -> Result<Vec<String>> {
     if !services.is_empty() {
+        verbose!("Using explicit service list: {:?}", services);
         return Ok(services.to_vec());
     }
 
@@ -68,6 +73,7 @@ pub fn resolve_services(ctx: &Context, services: &[String]) -> Result<Vec<String
 /// Returns an error if no service is specified and detection fails.
 pub fn resolve_service(ctx: &Context, service: &str) -> Result<String> {
     if !service.is_empty() {
+        verbose!("Using explicit service: {}", service);
         return Ok(service.to_string());
     }
 
@@ -93,11 +99,13 @@ pub fn resolve_service(ctx: &Context, service: &str) -> Result<String> {
 ///
 /// Returns an error if any of the service directories do not exist.
 pub fn validate_compose_dirs(ctx: &Context, services: &[String]) -> Result<()> {
+    verbose!("Validating compose directories for: {:?}", services);
     let mut missing = Vec::new();
 
     for service in services {
         let bare = get_bare_name(service);
         let dir = get_compose_dir(ctx, bare);
+        verbose!("Checking directory for '{}': {}", bare, dir.display());
         if !dir.exists() {
             missing.push((bare.to_string(), dir));
         }

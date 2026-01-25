@@ -1,6 +1,7 @@
 //! Logic for retrieving and processing Docker container information.
 
 use super::types::{ContainerInfo, PortInfo};
+use crate::verbose;
 use anyhow::{Context, Result};
 use bollard::query_parameters::ListContainersOptions;
 use bollard::Docker;
@@ -18,6 +19,7 @@ use bollard::Docker;
 ///
 /// Returns an error if the Docker API call fails.
 pub async fn list_containers(docker: &Docker) -> Result<Vec<ContainerInfo>> {
+    verbose!("Listing all containers via Docker API...");
     let options = ListContainersOptions {
         all: true,
         ..Default::default()
@@ -27,6 +29,8 @@ pub async fn list_containers(docker: &Docker) -> Result<Vec<ContainerInfo>> {
         .list_containers(Some(options))
         .await
         .context("Failed to list containers via Docker API")?;
+
+    verbose!("Found {} containers", containers.len());
 
     let mut result = Vec::new();
 
