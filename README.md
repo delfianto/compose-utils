@@ -7,7 +7,6 @@
 - **Systemd Integration**: Seamlessly manage Docker Compose services using `systemctl`.
 - **Root & Rootless Support**: Automatically detects and validates system-wide (Root) or user-level (Rootless) Docker installations.
 - **Direct Subcommands**: intuitive interface like `compose up`, `compose logs`, etc.
-- **Enhanced `ps` Output**: A global container overview with clean table formatting and proper ISO 8601 timestamps.
 - **Automatic Project Detection**: Run commands from inside a project directory without specifying the service name.
 - **Improved Reliability**: Uses `oneshot` systemd services with `ExecStopPost` cleanup to prevent orphaned containers on startup failure.
 - **Configuration Management**: Easily view and update environment variables (like `COMPOSE_BASE` or `TRAEFIK_ACME_EMAIL`) via `compose config`.
@@ -33,19 +32,19 @@ Commands can be run from anywhere. If run inside a directory containing a `compo
 
 ### Service Management
 
-| Command   | Alias     | Description                                         |
-| :-------- | :-------- | :-------------------------------------------------- |
-| `up`      | `start`   | Start services and show immediate systemd status.   |
-| `down`    | `stop`    | Stop services and perform cleanup.                  |
-| `reup`    | `restart` | Restart services.                                   |
-| `update`  |           | Pull latest images and restart if updated.          |
-| `pull`    |           | Download images without restarting.                 |
-| `status`  |           | Show current systemd unit status.                   |
-| `enable`  |           | Enable services to start on boot.                   |
-| `disable` |           | Disable services from starting on boot.             |
-| `ls`      | `list`    | List all managed services under `COMPOSE_BASE`.     |
-| `ps`      |           | Show all system containers with ISO timestamps.     |
-| `logs`    |           | View last 100 lines of logs (scrolls to end).       |
+| Command   | Alias     | Description                                       |
+| :-------- | :-------- | :------------------------------------------------ |
+| `up`      | `start`   | Start services and show immediate systemd status. |
+| `down`    | `stop`    | Stop services and perform cleanup.                |
+| `reup`    | `restart` | Restart services.                                 |
+| `update`  |           | Pull latest images and restart if updated.        |
+| `pull`    |           | Download images without restarting.               |
+| `status`  |           | Show current systemd unit status.                 |
+| `enable`  |           | Enable services to start on boot.                 |
+| `disable` |           | Disable services from starting on boot.           |
+| `ls`      | `list`    | List all managed services under `COMPOSE_BASE`.   |
+| `ps`      |           | Global container overview with status.            |
+| `logs`    |           | View last 100 lines of logs (scrolls to end).     |
 
 ### Examples
 
