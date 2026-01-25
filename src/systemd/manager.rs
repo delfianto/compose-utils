@@ -9,7 +9,7 @@ use std::process::Command;
 pub fn list_dependencies(ctx: &Context, unit: Option<&str>) -> Result<()> {
     verbose!("Listing dependencies for: {:?}", unit);
     let mut cmd = systemctl_cmd(ctx);
-    cmd.arg("list-dependencies").arg("--after").arg("--reverse");
+    cmd.arg("list-dependencies").arg("--reverse").arg("--all");
 
     if let Some(u) = unit {
         cmd.arg(u);
@@ -17,14 +17,12 @@ pub fn list_dependencies(ctx: &Context, unit: Option<&str>) -> Result<()> {
         cmd.arg("docker.service");
     }
 
-    let output = cmd.output()?;
+    let status = cmd.status()?;
 
-    if !output.status.success() {
-        let stderr = String::from_utf8_lossy(&output.stderr);
-        bail!("Failed to list dependencies: {}", stderr.trim());
+    if !status.success() {
+        bail!("Failed to list dependencies: systemctl exited with error");
     }
 
-    print!("{}", String::from_utf8_lossy(&output.stdout));
     Ok(())
 }
 
@@ -56,8 +54,8 @@ pub fn daemon_reload(ctx: &Context) -> Result<()> {
 /// Returns a Command pre-configured for systemctl (either root or user).
 fn systemctl_cmd(ctx: &Context) -> std::process::Command {
     let mut cmd = Command::new("systemctl");
-    // CRITICAL: Ensure consistent output regardless of user language
-    cmd.env("LC_ALL", "C");
+    // Ensure shell uses UTF-8 for pretty text output.
+    cmd.env("LC_ALL", "C.UTF-8");
     if !ctx.is_root {
         cmd.arg("--user");
     }
@@ -99,7 +97,6 @@ pub fn restart_unit(ctx: &Context, unit: &str) -> Result<()> {
 }
 
 fn run_systemctl(ctx: &Context, action: &str, unit: Option<&str>) -> Result<()> {
-
     let mut cmd = systemctl_cmd(ctx);
     cmd.arg(action);
 
