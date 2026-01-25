@@ -60,33 +60,6 @@ pub fn resolve_services(ctx: &Context, services: &[String]) -> Result<Vec<String
     );
 }
 
-/// Resolves a single service name, defaulting to CWD detection if the name is empty.
-///
-/// # Arguments
-///
-/// * `ctx` - The application context.
-/// * `service` - An explicit service name.
-///
-/// # Errors
-///
-/// Returns an error if no service is specified and detection fails.
-pub fn resolve_service(ctx: &Context, service: &str) -> Result<String> {
-    if !service.is_empty() {
-        verbose!("Using explicit service: {}", service);
-        return Ok(service.to_string());
-    }
-
-    if let Some(detected) = detect_service_from_cwd(ctx) {
-        println!("Auto-detected service: {}", detected);
-        return Ok(detected);
-    }
-
-    bail!(
-        "No service specified and current directory is not a compose project.\n\nEither specify a service name or run from a directory under {}",
-        ctx.compose_base.display()
-    );
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -159,23 +132,6 @@ mod tests {
         let ctx = test_context(test_dir.path());
         let result = detect_service_from_cwd(&ctx);
         assert!(result.is_none());
-    }
-
-    #[test]
-    fn test_resolve_service_with_explicit() {
-        let test_dir = TestDir::new("resolve-single-explicit");
-        let ctx = test_context(test_dir.path());
-        let result = resolve_service(&ctx, "myapp");
-        assert!(result.is_ok());
-        assert_eq!(result.unwrap(), "myapp");
-    }
-
-    #[test]
-    fn test_resolve_service_empty_not_in_project() {
-        let test_dir = TestDir::new("resolve-single-empty");
-        let ctx = test_context(test_dir.path());
-        let result = resolve_service(&ctx, "");
-        assert!(result.is_err());
     }
 
     #[test]

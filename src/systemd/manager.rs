@@ -3,16 +3,7 @@
 use crate::core::Context;
 use crate::verbose;
 use anyhow::{bail, Result};
-use serde::Deserialize;
 use std::process::Command;
-
-#[derive(Debug, Deserialize)]
-struct SystemdUnit {
-    unit: String,
-    active: String,
-    sub: String,
-    description: String,
-}
 
 /// Lists dependencies for a given unit or the default target.
 pub fn list_dependencies(ctx: &Context, unit: Option<&str>) -> Result<()> {
@@ -107,47 +98,8 @@ pub fn restart_unit(ctx: &Context, unit: &str) -> Result<()> {
     run_systemctl(ctx, "restart", Some(unit))
 }
 
-/// Information about a systemd unit.
-#[derive(Debug, Clone)]
-pub struct UnitInfo {
-    pub name: String,
-    pub active: String,
-    pub sub: String,
-    pub description: String,
-}
-
-/// Lists units matching an optional pattern.
-///
-/// Uses JSON output from systemctl for robust parsing.
-pub fn list_units(ctx: &Context, pattern: Option<&str>) -> Result<Vec<UnitInfo>> {
-    verbose!("Listing units matching pattern: {:?}", pattern);
-
-    let mut cmd = systemctl_cmd(ctx);
-    cmd.arg("list-units").arg("--output=json");
-
-    if let Some(p) = pattern {
-        cmd.arg(format!("{}*", p));
-    }
-
-    let output = cmd.output()?;
-    if !output.status.success() {
-        let stderr = String::from_utf8_lossy(&output.stderr);
-        bail!("Failed to list units: {}", stderr.trim());
-    }
-
-    // Parse JSON directly
-    let units: Vec<SystemdUnit> = serde_json::from_slice(&output.stdout)?;
-
-    Ok(units.into_iter().map(|u| UnitInfo {
-        name: u.unit,
-        active: u.active,
-        sub: u.sub,
-        description: u.description
-    }).collect())
-}
-
 fn run_systemctl(ctx: &Context, action: &str, unit: Option<&str>) -> Result<()> {
-    verbose!("Running systemctl {} {:?}", action, unit);
+
     let mut cmd = systemctl_cmd(ctx);
     cmd.arg(action);
 

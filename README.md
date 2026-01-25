@@ -6,7 +6,7 @@
 
 - **Systemd Integration**: Seamlessly manage Docker Compose services using `systemctl`.
 - **Root & Rootless Support**: Automatically detects and validates system-wide (Root) or user-level (Rootless) Docker installations.
-- **Direct Subcommands**: intuitive interface like `compose up`, `compose logs`, etc.
+- **Direct Subcommands**: intuitive interface like `compose up`, `compose ps`, etc.
 - **Automatic Project Detection**: Run commands from inside a project directory without specifying the service name.
 - **Improved Reliability**: Uses `oneshot` systemd services with `ExecStopPost` cleanup to prevent orphaned containers on startup failure.
 - **Configuration Management**: Easily view and update environment variables (like `COMPOSE_BASE` or `TRAEFIK_ACME_EMAIL`) via `compose config`.
@@ -20,10 +20,6 @@
 3.  **Build and Install:**
     ```bash
     just install
-    ```
-4.  **Update/Reinstall:** (Rebuilds and re-applies changes)
-    ```bash
-    just reinstall
     ```
 
 ## Usage
@@ -42,18 +38,13 @@ Commands can be run from anywhere. If run inside a directory containing a `compo
 | `status`  |           | Show current systemd unit status.                 |
 | `enable`  |           | Enable services to start on boot.                 |
 | `disable` |           | Disable services from starting on boot.           |
-| `ls`      | `list`    | List all managed services under `COMPOSE_BASE`.   |
 | `ps`      |           | Global container overview with status.            |
-| `logs`    |           | View last 100 lines of logs (scrolls to end).     |
 
 ### Examples
 
 ```bash
 # Start a specific project
 compose up genai/ollama
-
-# View logs (auto-scroll to bottom, default 100 lines)
-compose logs genai/ollama -f
 
 # Check system containers (Global view)
 compose ps
