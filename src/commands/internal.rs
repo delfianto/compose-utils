@@ -10,6 +10,7 @@ pub fn run_service(ctx: &Context, name: &str) -> Result<()> {
     let err = Command::new("docker")
         .arg("compose")
         .arg("up")
+        .arg("-d")
         .current_dir(project_dir)
         .exec();
 
