@@ -8,7 +8,6 @@ use clap::{Parser, Subcommand};
 
 mod commands;
 mod compose;
-mod constants;
 mod core;
 mod display;
 mod docker;

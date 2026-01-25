@@ -2,7 +2,7 @@
 
 use super::env::{load_env_file, resolve_env_vars};
 use super::types::DockerCompose;
-use crate::constants::COMPOSE_FILES;
+use crate::core::COMPOSE_FILES;
 use anyhow::{Context, Result};
 use std::collections::HashMap;
 use std::fs;

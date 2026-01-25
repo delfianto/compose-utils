@@ -1,7 +1,7 @@
 //! Logic for discovering and resolving systemd services based on the filesystem.
 
 use super::service::{get_bare_name, get_compose_dir};
-use crate::constants::COMPOSE_FILES;
+use crate::core::COMPOSE_FILES;
 use crate::core::Context;
 use anyhow::{bail, Result};
 use std::env;
