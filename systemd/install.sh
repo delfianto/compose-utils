@@ -179,17 +179,14 @@ if [ -n "$INPUT_ENV" ]; then
         exit 1
     fi
 else
-    if [ -f "$CONF_FILE" ]; then
-        echo -e "\nConfiguration file already exists at: $CONF_FILE"
-        read -p "Do you want to reconfigure it? [y/N] " choice
-        case "$choice" in
-            y|Y ) RECONFIGURE=1 ;;
-            * ) RECONFIGURE=0 ;;
-        esac
-    else
-        RECONFIGURE=1
-    fi
-
+        if [ -f "$CONF_FILE" ]; then
+            log_warn "Configuration file already exists at: $CONF_FILE"
+            log_info "Skipping configuration setup to preserve your existing settings."
+            log_info "Only binary and systemd units will be updated."
+            RECONFIGURE=0
+        else
+            RECONFIGURE=1
+        fi
     if [ "$RECONFIGURE" -eq 1 ]; then
         echo -e "\nHow do you want to configure?"
         echo "1) Interactive Setup (Guided)"
