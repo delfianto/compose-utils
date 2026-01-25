@@ -102,6 +102,7 @@ pub struct UnitInfo {
 /// making this robust against output format changes.
 pub fn list_units(ctx: &Context, pattern: Option<&str>) -> Result<Vec<UnitInfo>> {
     verbose!("Listing units matching pattern: {:?}", pattern);
+
     // First, get the list of unit names using plain output
     let mut cmd = systemctl_cmd(ctx);
     cmd.args(["list-units", "--no-pager", "--no-legend", "--plain"]);

@@ -11,6 +11,7 @@ mod compose;
 mod core;
 mod display;
 mod docker;
+mod setup;
 mod systemd;
 
 use crate::commands::{config, deps};
@@ -107,6 +108,9 @@ enum Commands {
     Deps(deps::DepsArgs),
     /// View or update global configuration.
     Config(config::ConfigArgs),
+    /// System information and diagnostics.
+    #[command(subcommand)]
+    System(commands::system::SystemCommands),
 }
 
 /// Entry point of the application.
@@ -119,6 +123,12 @@ async fn main() -> Result<()> {
 
     if cli.verbose {
         enable_verbose();
+    }
+
+    // Bypass context initialization for system commands (install/uninstall/info)
+    // as they may run in incomplete environments.
+    if let Commands::System(args) = cli.command {
+        return commands::system::run_system(args);
     }
 
     let ctx = get_context()?;
@@ -141,5 +151,6 @@ async fn main() -> Result<()> {
         } => commands::run_logs(&ctx, service.as_deref().unwrap_or(""), follow, lines).await,
         Commands::Deps(args) => deps::run(&ctx, args).await,
         Commands::Config(args) => config::run(&ctx, args),
+        Commands::System(_) => unreachable!(),
     }
 }

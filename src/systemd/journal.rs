@@ -64,7 +64,6 @@ impl JournalReader {
     where
         F: FnMut(&LogEntry) -> bool,
     {
-        // Set up Ctrl+C handler for graceful exit
         let interrupted = Arc::new(AtomicBool::new(false));
         let interrupted_clone = Arc::clone(&interrupted);
 
@@ -73,24 +72,19 @@ impl JournalReader {
         })
         .context("Failed to set Ctrl+C handler")?;
 
-        // Matches should already be applied by logs_for_unit, but let's ensure it.
-        // match_add is idempotent/cumulative so it doesn't hurt.
         self.apply_unit_matches(unit)?;
 
-        // If we just called logs_for_unit, we might already be at the end.
-        // But seeking to tail ensures we don't repeat what we just read.
+        // Ensure we don't repeat what we just read if logs_for_unit was called prior.
         self.journal.seek_tail()?;
 
         loop {
-            // Check for interrupt before waiting
             if interrupted.load(Ordering::SeqCst) {
                 return Ok(());
             }
 
-            // Wait for new data (blocks for up to 1 second)
+            // Block for up to 1 second waiting for new data.
             self.journal.wait(Some(Duration::from_secs(1)))?;
 
-            // Check for interrupt after waiting
             if interrupted.load(Ordering::SeqCst) {
                 return Ok(());
             }
@@ -102,7 +96,6 @@ impl JournalReader {
                     }
                 }
 
-                // Check for interrupt while processing entries
                 if interrupted.load(Ordering::SeqCst) {
                     return Ok(());
                 }
@@ -124,7 +117,7 @@ impl JournalReader {
             .ok()?
             .as_micros() as u64;
 
-        // Try to get a meaningful identifier
+        // Try to obtain a meaningful identifier from COMPOSE_SERVICE or SYSLOG_IDENTIFIER.
         let identifier = self
             .journal
             .get_data("COMPOSE_SERVICE")

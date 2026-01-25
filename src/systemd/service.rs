@@ -39,20 +39,19 @@ pub fn name_to_dir_path(ctx: &Context, name: &str) -> String {
 
 /// Normalizes a name into a full systemd unit name.
 ///
-/// Handles the following cases:
-/// 1. Already fully qualified (e.g., `compose@myapp.service`) -> Return as is.
-/// 2. Likely standard systemd unit (no slash, contains @ or ends with .service/.target etc) -> Return as is.
-/// 3. Compose project path (e.g., `genai/ollama`) -> `compose@genai-ollama.service`.
-/// 4. Flat name or dashed name -> Check if it exists as a project.
-///    - If project exists (e.g., `genai-ollama` -> `genai/ollama` exists) -> `compose@genai-ollama.service`.
-///    - If project NOT found (e.g., `docker`) -> `<name>.service`.
+/// The normalization strategy is:
+/// 1. If it's already a full `compose@` unit name, return it.
+/// 2. If it looks like a standard unit (no slash, has extension or @), return it.
+/// 3. Otherwise, try to resolve it as a compose project.
+///    - If it matches a directory (nested or flat), format as `compose@<flat-name>.service`.
+///    - If not, fallback to a standard `.service` suffix.
 pub fn normalize_unit_name(ctx: &Context, name: &str) -> String {
-    // 1. Already fully qualified correctly.
+    // Already fully qualified correctly.
     if name.starts_with("compose@") && name.ends_with(".service") && !name.contains('/') {
         return name.to_string();
     }
 
-    // 2. Likely standard systemd unit (must NOT have slash, as our projects do).
+    // Likely standard systemd unit (must NOT have slash, as our projects do).
     if !name.starts_with("compose@")
         && !name.contains('/')
         && (name.contains('@')
@@ -64,15 +63,13 @@ pub fn normalize_unit_name(ctx: &Context, name: &str) -> String {
         return name.to_string();
     }
 
-    // 3. Extract the inner part if it has prefixes/suffixes.
+    // Extract the inner part if it has prefixes/suffixes.
     let mut inner = name;
     if let Some(stripped) = name.strip_prefix("compose@") {
         inner = stripped;
     }
-    // Don't strip .service yet if it's already there and we might want to keep it.
-    // Actually, if it has .service AND we got here, it's either a compose name or a mixed name.
 
-    // 4. Determine if it's a compose project.
+    // Determine if it's a compose project.
     let bare = inner.strip_suffix(".service").unwrap_or(inner);
     let potential_dir = name_to_dir_path(ctx, bare);
     let project_exists = ctx.compose_base.join(&potential_dir).exists();

@@ -192,9 +192,6 @@ async fn add_deps(
 /// This updates the systemd override file to match the provided configuration.
 /// Existing dependencies not specified in the config are preserved, unless
 /// there is a conflict (which currently shouldn't happen as we just append).
-/// Actually, for the "apply" semantics from a file, we might want to ensure
-/// the file matches the config. But for now, let's implement it as ensuring
-/// these dependencies exist.
 pub fn apply_dependencies(
     ctx: &Context,
     service: &str,
@@ -205,7 +202,7 @@ pub fn apply_dependencies(
 
     fs::create_dir_all(&override_dir)?;
 
-    // When applying from a file, we start with a clean slate to avoid stale dependencies
+    // Start with a clean slate to avoid stale dependencies
     let mut current_deps: SystemdDeps = HashMap::new();
     current_deps.insert("Requires".to_string(), Vec::new());
     current_deps.insert("Wants".to_string(), Vec::new());
