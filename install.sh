@@ -1,12 +1,43 @@
 #!/bin/bash
 set -e
 
-# Detect directories
-XDG_CONFIG_HOME="${XDG_CONFIG_HOME:-$HOME/.config}"
-XDG_DATA_HOME="${XDG_DATA_HOME:-$HOME/.local/share}"
-BIN_DIR="$HOME/.local/bin"
-SYSTEMD_DIR="$XDG_CONFIG_HOME/systemd/user"
-CONFIG_DIR="$XDG_CONFIG_HOME/docker"
+# Colors
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+BLUE='\033[0;34m'
+NC='\033[0m' # No Color
+
+log_info() { echo -e "${BLUE}>>${NC} $1"; }
+log_success() { echo -e "${GREEN}OK${NC} $1"; }
+log_warn() { echo -e "${YELLOW}WARN${NC} $1"; }
+log_err() { echo -e "${RED}ERR${NC} $1"; }
+
+# Detect Mode and set Paths
+if [ "$EUID" -eq 0 ]; then
+    log_warn "Sudo/Root detected. Installing system-wide."
+    echo -e "${RED}!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!${NC}"
+    echo -e "${RED}WARNING: Standard system-wide (non-rootless) installation is UNSUPPORTED${NC}"
+    echo -e "${RED}         and UNTESTED. Proceed at your own risk.${NC}"
+    echo -e "${RED}!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!${NC}"
+    echo ""
+    read -p "Do you want to continue anyway? [y/N] " confirm
+    [[ "$confirm" =~ ^[yY] ]] || exit 1
+
+    BIN_DIR="/usr/bin"
+    SYSTEMD_DIR="/etc/systemd/system"
+    CONFIG_DIR="/etc"
+    SYSTEMCTL_CMD="systemctl"
+    IS_ROOT=true
+else
+    XDG_CONFIG_HOME="${XDG_CONFIG_HOME:-$HOME/.config}"
+    BIN_DIR="$HOME/.local/bin"
+    SYSTEMD_DIR="$XDG_CONFIG_HOME/systemd/user"
+    CONFIG_DIR="$XDG_CONFIG_HOME/docker"
+    SYSTEMCTL_CMD="systemctl --user"
+    IS_ROOT=false
+fi
+
 CONF_FILE="$CONFIG_DIR/compose.env"
 
 # Required keys for validation
@@ -19,18 +50,6 @@ REQUIRED_KEYS=(
     "DOCKER_HOST"
     "DOCKER_SOCK"
 )
-
-# Colors
-RED='\033[0;31m'
-GREEN='\033[0;32m'
-YELLOW='\033[1;33m'
-BLUE='\033[0;34m'
-NC='\033[0m' # No Color
-
-log_info() { echo -e "${BLUE}>>${NC} $1"; }
-log_success() { echo -e "${GREEN}OK${NC} $1"; }
-log_warn() { echo -e "${YELLOW}WARN${NC} $1"; }
-log_err() { echo -e "${RED}ERR${NC} $1"; }
 
 # Function to validate an env file contains all required keys
 validate_env_file() {
@@ -49,25 +68,22 @@ validate_env_file() {
         fi
     done
 
-    if [ $missing -eq 1 ]; then
-        return 1
-    fi
-    return 0
+    return $missing
 }
 
 # Function for interactive configuration
 interactive_setup() {
-    local temp_file=$(mktemp) 
+    local temp_file=$(mktemp)
     
-    # Determine defaults based on current user
-    local default_data="/srv/data"
-    local default_base="/srv/compose"
-    local default_docker_sock="/var/run/docker.sock"
-    
-    if [ "$EUID" -ne 0 ]; then
-        default_data="$HOME/data"
-        default_base="$HOME/compose-projects"
-        default_docker_sock="/run/user/$(id -u)/docker.sock"
+    # Determine defaults based on detected mode
+    if [ "$IS_ROOT" = true ]; then
+        local default_data="/srv/data"
+        local default_base="/srv/compose"
+        local default_docker_sock="/var/run/docker.sock"
+    else
+        local default_data="$HOME/data"
+        local default_base="$HOME/compose-projects"
+        local default_docker_sock="/run/user/$(id -u)/docker.sock"
     fi
 
     echo -e "\n${YELLOW}Interactive Configuration:${NC}"
@@ -167,8 +183,8 @@ else
         echo -e "\nConfiguration file already exists at: $CONF_FILE"
         read -p "Do you want to reconfigure it? [y/N] " choice
         case "$choice" in 
-            y|Y ) RECONFIGURE=1 ;; 
-            * ) RECONFIGURE=0 ;; 
+            y|Y ) RECONFIGURE=1 ;;
+            * ) RECONFIGURE=0 ;;
         esac
     else
         RECONFIGURE=1
@@ -177,7 +193,7 @@ else
     if [ "$RECONFIGURE" -eq 1 ]; then
         echo -e "\nHow do you want to configure?"
         echo "1) Interactive Setup (Guided)"
-        echo "2) Manual Edit (Creates file and exits info)"
+        echo "2) Manual Edit (Exits with a template)"
         read -p "Select [1-2]: " mode
 
         case "$mode" in
@@ -186,8 +202,8 @@ else
                 if [ ! -f "$CONF_FILE" ]; then
                     cp "systemd/compose.env" "$CONF_FILE"
                     
-                    # Try to adjust defaults even for manual start
-                    if [ "$EUID" -ne 0 ]; then
+                    # Try to adjust defaults for the chosen mode
+                    if [ "$IS_ROOT" = false ]; then
                         sed -i "s|/srv/data|$HOME/data|g" "$CONF_FILE"
                         sed -i "s|/srv/compose|$HOME/compose-projects|g" "$CONF_FILE"
                         sed -i "s|/var/run/docker.sock|/run/user/$(id -u)/docker.sock|g" "$CONF_FILE"
@@ -209,8 +225,8 @@ else
 fi
 
 # 5. Reload Systemd
-log_info "Reloading systemd --user..."
-systemctl --user daemon-reload
+log_info "Reloading systemd..."
+$SYSTEMCTL_CMD daemon-reload
 
 echo ""
 log_success "Installation Complete!"
@@ -218,5 +234,7 @@ echo "   - Binary:  $BIN_DIR/compose"
 echo "   - Config:  $CONF_FILE"
 echo "   - Service: $SYSTEMD_DIR/compose@.service"
 
-echo ""
-echo "   Make sure $BIN_DIR is in your PATH."
+if [ "$IS_ROOT" = false ]; then
+    echo ""
+    echo "   Make sure $BIN_DIR is in your PATH."
+fi
