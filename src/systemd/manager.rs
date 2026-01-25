@@ -80,6 +80,51 @@ pub fn restart_unit(ctx: &Context, unit: &str) -> Result<()> {
     run_systemctl(ctx, "restart", Some(unit))
 }
 
+/// Information about a systemd unit.
+#[derive(Debug, Clone)]
+pub struct UnitInfo {
+    pub name: String,
+    pub active: String,
+    pub sub: String,
+    pub description: String,
+}
+
+/// Lists units matching an optional pattern.
+pub fn list_units(ctx: &Context, pattern: Option<&str>) -> Result<Vec<UnitInfo>> {
+    let mut cmd = systemctl_cmd(ctx);
+    cmd.args(["list-units", "--no-pager", "--no-legend", "--full"]);
+
+    if let Some(p) = pattern {
+        cmd.arg(format!("{}*", p));
+    }
+
+    let output = cmd.output()?;
+
+    if !output.status.success() {
+        bail!("Failed to list units via systemctl");
+    }
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let units = stdout
+        .lines()
+        .filter_map(|line| {
+            let parts: Vec<&str> = line.split_whitespace().collect();
+            if parts.len() >= 4 {
+                Some(UnitInfo {
+                    name: parts[0].to_string(),
+                    active: parts[2].to_string(),
+                    sub: parts[3].to_string(),
+                    description: parts[4..].join(" "),
+                })
+            } else {
+                None
+            }
+        })
+        .collect();
+
+    Ok(units)
+}
+
 fn run_systemctl(ctx: &Context, action: &str, unit: Option<&str>) -> Result<()> {
     let mut cmd = systemctl_cmd(ctx);
     cmd.arg(action);

@@ -1,7 +1,5 @@
-//! Systemd integration via D-Bus and filesystem management.
+//! Systemd integration via CLI and filesystem management.
 
-pub mod client;
-pub mod dbus;
 pub mod discovery;
 pub mod journal;
 pub mod manager;

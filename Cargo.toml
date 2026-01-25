@@ -22,7 +22,6 @@ tempfile = "3"
 tokio = { version = "1", features = ["full"] }
 toml = "0.9"
 url = "2.5"
-zbus = { version = "5", default-features = false, features = ["tokio"] }
 
 [dev-dependencies]
 tempfile = "3.8"

@@ -1,10 +1,9 @@
-//! High-level command implementations for managing systemd services via D-Bus.
+//! High-level command implementations for managing systemd compose services.
 
 use crate::compose::project::get_required_images;
 use crate::core::Context;
 use crate::docker::connect_docker;
 use crate::docker::images::pull_image_with_progress;
-use crate::systemd::client::SystemdClient;
 use crate::systemd::discovery::{resolve_service, resolve_services};
 use crate::systemd::journal::{JournalReader, LogEntry};
 use crate::systemd::service::{get_bare_name, get_compose_dir, normalize_unit_name};
@@ -135,8 +134,7 @@ pub async fn run_restart(ctx: &Context, names: &[String]) -> Result<()> {
 
 /// Executes the `list` (or `ls`) command to show all `compose@` units.
 pub async fn run_list(ctx: &Context) -> Result<()> {
-    let systemd = SystemdClient::new(!ctx.is_root).await?;
-    let units = systemd.list_units(Some("compose@")).await?;
+    let units = crate::systemd::manager::list_units(ctx, Some("compose@"))?;
 
     if units.is_empty() {
         println!("No compose units found.");
@@ -147,10 +145,7 @@ pub async fn run_list(ctx: &Context) -> Result<()> {
     for unit in units {
         println!(
             "{:<40} {:<15} {:<15} {}",
-            unit.name,
-            format!("{:?}", unit.active_state),
-            format!("{:?}", unit.sub_state),
-            unit.description
+            unit.name, unit.active, unit.sub, unit.description
         );
     }
 
