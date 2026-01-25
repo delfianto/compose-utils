@@ -1,21 +1,19 @@
 use crate::core::Context;
 use crate::systemd::service::get_compose_dir;
 use anyhow::Result;
-use std::process::Command;
 use std::os::unix::process::CommandExt;
+use std::process::Command;
 
-pub fn run_service(ctx: &Context, service: &str) -> Result<()> {
-    let dir = get_compose_dir(ctx, service);
-    
-    // We replace the current process with docker compose
-    // This ensures signals are handled correctly and we don't keep an extra process
+pub fn run_service(ctx: &Context, name: &str) -> Result<()> {
+    let project_dir = get_compose_dir(ctx, name);
+
     let err = Command::new("docker")
-        .args(["compose", "up", "--wait", "--remove-orphans"])
-        .current_dir(&dir)
+        .arg("compose")
+        .arg("up")
+        .current_dir(project_dir)
         .exec();
 
-    // exec only returns on error
-    Err(anyhow::anyhow!("Failed to execute docker compose: {}", err))
+    Err(anyhow::anyhow!("Failed to exec docker compose: {}", err))
 }
 
 pub fn stop_service(ctx: &Context, service: &str) -> Result<()> {

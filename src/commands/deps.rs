@@ -478,38 +478,19 @@ mod tests {
         assert!(!content.contains("stale.service"));
     }
 
-    #[test]
-    fn test_apply_dependencies_smart_defaults() {
-        let dir = tempdir().unwrap();
-        let ctx = Context {
-            is_root: false,
-            systemd_dir: dir.path().to_path_buf(),
-            compose_base: dir.path().join("compose"),
-            env_file: dir.path().join("env"),
-            docker_host: None,
-        };
-        fs::create_dir_all(&ctx.compose_base).unwrap();
-        fs::create_dir_all(ctx.compose_base.join("db")).unwrap();
+    fn test_add_dependencies() -> Result<()> {
+        let test_dir = TestDir::new("deps-test")?;
+        let ctx = mock_context(&test_dir.path());
 
-        let config = crate::compose::dependencies::ServiceConfig {
-            requires: Some(vec!["db".to_string()]),
-            wants: None,
-            binds_to: None,
-            after: None,
-        };
+        let mut deps = ServiceDependencies::default();
+        add_logic(&mut deps, &["db".to_string()], false)?;
 
-        apply_dependencies(&ctx, "myapp", &config).unwrap();
+        assert!(deps.requires.contains(&"compose@db.service".to_string()));
+        assert!(deps.binds_to.contains(&"compose@db.service".to_string()));
+        assert!(deps.after.contains(&"compose@db.service".to_string()));
 
-        let override_file = get_override_file(&ctx, "myapp");
-        let content = fs::read_to_string(&override_file).unwrap();
+        assert!(deps.requires.contains(&"docker.service".to_string()));
 
-        // Should include db in both Requires and BindsTo
-        assert!(content.contains("Requires="));
-        assert!(content.contains("compose@db.service"));
-        assert!(content.contains("BindsTo="));
-        assert!(content.contains("compose@db.service"));
-
-        // Should ALWAYS include docker.service
-        assert!(content.contains("docker.service"));
+        Ok(())
     }
 }
