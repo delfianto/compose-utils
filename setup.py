@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Thin wrapper for installing the compose utility via the Rust binary.
+Thin wrapper for installing the compose utility.
 """
 
 import argparse
@@ -9,8 +9,6 @@ import sys
 from pathlib import Path
 
 SCRIPT_DIR = Path(__file__).parent.resolve()
-PROJECT_ROOT = SCRIPT_DIR.parent
-BINARY_NAME = "compose"
 
 
 def main() -> None:
@@ -22,7 +20,7 @@ def main() -> None:
         choices=["install", "uninstall", "reinstall"],
         help="Command to run",
     )
-    # Forward known args to the binary
+
     parser.add_argument("--compose-data", help="Set COMPOSE_DATA directory path")
     parser.add_argument("--compose-base", help="Set COMPOSE_BASE directory path")
     parser.add_argument("--acme-domain", help="Set ACME domain for Traefik")
@@ -30,20 +28,10 @@ def main() -> None:
     parser.add_argument("--acme-server", help="Set ACME server URL for Traefik")
     parser.add_argument("--docker-host", help="Set DOCKER_HOST")
 
-    args, unknown = parser.parse_known_args()
-
-    # Locate the binary
-    local_binary = PROJECT_ROOT / "target/release" / BINARY_NAME
-    if not local_binary.exists():
-        print(f"Error: Binary not found at {local_binary}")
-        print("Please run 'cargo build --release' first.")
-        sys.exit(1)
-
-    # Build the command
-    cmd = [str(local_binary), "system"]
+    args, _ = parser.parse_known_args()
+    cmd = ["cargo", "run", "--release", "--", "system"]
 
     if args.command == "install" or args.command == "reinstall":
-        # 'reinstall' is just 'install' in the new logic (it detects existing env)
         cmd.append("install")
         if args.compose_data:
             cmd.extend(["--compose-data", args.compose_data])
@@ -60,12 +48,8 @@ def main() -> None:
     elif args.command == "uninstall":
         cmd.append("uninstall")
 
-    # Pass through any unknown args (though we likely don't need them)
-    cmd.extend(unknown)
-
     try:
-        # Execute the Rust binary to perform the operation
-        subprocess.run(cmd, check=True)
+        subprocess.run(cmd, check=True, cwd=SCRIPT_DIR)
     except subprocess.CalledProcessError as e:
         sys.exit(e.returncode)
     except Exception as e:
