@@ -9,9 +9,6 @@ use clap::{Parser, Subcommand};
 mod commands;
 mod compose;
 mod core;
-
-
-
 mod systemd;
 
 use crate::commands::{config, deps};
@@ -108,7 +105,16 @@ enum Commands {
     Deps(deps::DepsArgs),
     /// View or update global configuration.
     Config(config::ConfigArgs),
-
+    
+    // Internal Commands (used by systemd)
+    #[command(hide = true)]
+    RunService {
+        service: String,
+    },
+    #[command(hide = true)]
+    StopService {
+        service: String,
+    },
 }
 
 /// Entry point of the application.
@@ -122,8 +128,6 @@ async fn main() -> Result<()> {
     if cli.verbose {
         enable_verbose();
     }
-
-
 
     let ctx = get_context()?;
 
@@ -145,6 +149,8 @@ async fn main() -> Result<()> {
         } => commands::run_logs(&ctx, service.as_deref().unwrap_or(""), follow, lines).await,
         Commands::Deps(args) => deps::run(&ctx, args).await,
         Commands::Config(args) => config::run(&ctx, args),
-
+        
+        Commands::RunService { service } => commands::internal::run_service(&ctx, &service),
+        Commands::StopService { service } => commands::internal::stop_service(&ctx, &service),
     }
 }

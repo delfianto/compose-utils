@@ -57,7 +57,7 @@ validate_env_file() {
 
 # Function for interactive configuration
 interactive_setup() {
-    local temp_file=$(mktemp)
+    local temp_file=$(mktemp) 
     
     # Determine defaults based on current user
     local default_data="/srv/data"
@@ -147,6 +147,8 @@ install -Dm755 "target/release/compose" "$BIN_DIR/compose"
 log_info "Installing systemd unit to $SYSTEMD_DIR..."
 mkdir -p "$SYSTEMD_DIR"
 install -Dm644 "systemd/compose@.service" "$SYSTEMD_DIR/compose@.service"
+# Replace placeholder with actual binary path
+sed -i "s|BINARY_PATH|$BIN_DIR/compose|g" "$SYSTEMD_DIR/compose@.service"
 
 # 4. Handle Configuration
 mkdir -p "$CONFIG_DIR"

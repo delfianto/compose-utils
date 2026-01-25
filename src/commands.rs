@@ -5,10 +5,10 @@
 
 pub mod config;
 pub mod deps;
+pub mod internal;
 pub mod ps;
 pub mod pull;
 pub mod service;
-
 pub mod update;
 
 pub use pull::run_pull;
