@@ -4,11 +4,11 @@ use crate::systemd::discovery::resolve_services;
 use crate::systemd::manager::restart_unit;
 use anyhow::Result;
 
-pub async fn run_update(ctx: &Context, services: &[String]) -> Result<()> {
+pub fn run_update(ctx: &Context, services: &[String]) -> Result<()> {
     let services = resolve_services(ctx, services)?;
 
     for service in services {
-        run_pull(ctx, &[service.to_string()]).await?;
+        run_pull(ctx, &[service.to_string()])?;
         restart_unit(ctx, &service)?;
     }
 

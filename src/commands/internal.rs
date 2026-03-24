@@ -19,7 +19,7 @@ pub fn run_service(ctx: &Context, name: &str) -> Result<()> {
 
 pub fn stop_service(ctx: &Context, service: &str) -> Result<()> {
     let dir = get_compose_dir(ctx, service);
-    
+
     let err = Command::new("docker")
         .args(["compose", "down", "--remove-orphans"])
         .current_dir(&dir)

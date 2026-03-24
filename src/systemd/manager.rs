@@ -2,7 +2,7 @@
 
 use crate::core::Context;
 use crate::verbose;
-use anyhow::{bail, Result};
+use anyhow::{Result, bail};
 use std::process::Command;
 
 /// Lists dependencies for a given unit or the default target.
