@@ -343,4 +343,94 @@ mod tests {
         let dir = get_compose_dir(&ctx, "compose@myapp.service");
         assert_eq!(dir, test_dir.path().join("myapp"));
     }
+
+    // --- Idempotency tests ---
+
+    #[test]
+    fn test_normalize_idempotent() {
+        let test_dir = TestDir::new("norm-idempotent");
+        test_dir.create_dir("myapp");
+        let ctx = test_context(test_dir.path());
+        let once = normalize_unit_name(&ctx, "myapp");
+        let twice = normalize_unit_name(&ctx, &once);
+        assert_eq!(once, twice);
+    }
+
+    #[test]
+    fn test_normalize_idempotent_nested() {
+        let test_dir = TestDir::new("norm-idempotent-nested");
+        test_dir.create_dir("genai/ollama");
+        let ctx = test_context(test_dir.path());
+        let once = normalize_unit_name(&ctx, "genai/ollama");
+        let twice = normalize_unit_name(&ctx, &once);
+        assert_eq!(once, twice);
+    }
+
+    // --- get_bare_name edge cases ---
+
+    #[test]
+    fn test_get_bare_name_empty_string() {
+        assert_eq!(get_bare_name(""), "");
+    }
+
+    #[test]
+    fn test_get_bare_name_only_service_suffix() {
+        assert_eq!(get_bare_name(".service"), "");
+    }
+
+    #[test]
+    fn test_get_bare_name_only_prefix() {
+        assert_eq!(get_bare_name("compose@"), "");
+    }
+
+    #[test]
+    fn test_get_bare_name_standard_service() {
+        // Non-compose service names pass through stripped of .service
+        assert_eq!(get_bare_name("docker.service"), "docker");
+    }
+
+    // --- normalize_unit_name with timer/socket/target ---
+
+    #[test]
+    fn test_normalize_preserves_timer() {
+        let test_dir = TestDir::new("norm-timer");
+        let ctx = test_context(test_dir.path());
+        assert_eq!(normalize_unit_name(&ctx, "cleanup.timer"), "cleanup.timer");
+    }
+
+    #[test]
+    fn test_normalize_preserves_socket() {
+        let test_dir = TestDir::new("norm-socket");
+        let ctx = test_context(test_dir.path());
+        assert_eq!(normalize_unit_name(&ctx, "dbus.socket"), "dbus.socket");
+    }
+
+    // --- name_to_dir_path edge cases ---
+
+    #[test]
+    fn test_name_to_dir_path_empty_string() {
+        let test_dir = TestDir::new("dir-path-empty");
+        let ctx = test_context(test_dir.path());
+        // Empty string - no directory exists, returns as-is
+        assert_eq!(name_to_dir_path(&ctx, ""), "");
+    }
+
+    #[test]
+    fn test_name_to_dir_path_multiple_dashes() {
+        let test_dir = TestDir::new("dir-path-multi-dash");
+        test_dir.create_dir("a/b/c/d");
+        let ctx = test_context(test_dir.path());
+        assert_eq!(name_to_dir_path(&ctx, "a-b-c-d"), "a/b/c/d");
+    }
+
+    // --- get_compose_dir with various inputs ---
+
+    #[test]
+    fn test_get_compose_dir_nonexistent() {
+        let test_dir = TestDir::new("compose-dir-noexist");
+        let ctx = test_context(test_dir.path());
+        // Should still return a path, even if it doesn't exist
+        let dir = get_compose_dir(&ctx, "nonexistent");
+        assert_eq!(dir, test_dir.path().join("nonexistent"));
+    }
 }

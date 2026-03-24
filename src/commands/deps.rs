@@ -41,29 +41,29 @@ pub struct DepsArgs {
 ///
 /// * `ctx` - The application context.
 /// * `args` - The parsed command arguments.
-pub async fn run(ctx: &Context, args: DepsArgs) -> Result<()> {
+pub fn run(ctx: &Context, args: DepsArgs) -> Result<()> {
     match args.service {
         Some(service) => {
             if args.clear {
-                clear_deps(ctx, &service).await
+                clear_deps(ctx, &service)
             } else if let Some(deps) = &args.add {
-                add_deps(ctx, &service, deps, args.requires).await
+                add_deps(ctx, &service, deps, args.requires)
             } else if let Some(deps) = &args.remove {
-                remove_deps(ctx, &service, deps).await
+                remove_deps(ctx, &service, deps)
             } else {
-                list_deps(ctx, &service).await
+                list_deps(ctx, &service)
             }
         }
         None => {
             if args.add.is_some() || args.remove.is_some() || args.clear {
                 anyhow::bail!("Cannot modify dependencies without specifying a service.");
             }
-            list_all_deps(ctx).await
+            list_all_deps(ctx)
         }
     }
 }
 
-async fn clear_deps(ctx: &Context, service: &str) -> Result<()> {
+fn clear_deps(ctx: &Context, service: &str) -> Result<()> {
     let override_file = get_override_file(ctx, service);
     if override_file.exists() {
         println!("Clearing dependencies for {}...", service);
@@ -75,7 +75,7 @@ async fn clear_deps(ctx: &Context, service: &str) -> Result<()> {
     Ok(())
 }
 
-async fn list_all_deps(ctx: &Context) -> Result<()> {
+fn list_all_deps(ctx: &Context) -> Result<()> {
     crate::systemd::manager::list_dependencies(ctx, None)
 }
 
@@ -151,12 +151,7 @@ fn write_override_file(override_file: &Path, deps: &SystemdDeps) -> Result<()> {
 }
 
 /// Logic for the `add` action.
-async fn add_deps(
-    ctx: &Context,
-    service: &str,
-    deps_to_add: &[String],
-    requires: bool,
-) -> Result<()> {
+fn add_deps(ctx: &Context, service: &str, deps_to_add: &[String], requires: bool) -> Result<()> {
     let override_dir = get_override_dir(ctx, service);
     let override_file = get_override_file(ctx, service);
 
@@ -263,7 +258,7 @@ fn update_deps_list(ctx: &Context, deps: &mut SystemdDeps, key: &str, items: &[S
 }
 
 /// Logic for the `remove` action.
-async fn remove_deps(ctx: &Context, service: &str, deps_to_remove: &[String]) -> Result<()> {
+fn remove_deps(ctx: &Context, service: &str, deps_to_remove: &[String]) -> Result<()> {
     let override_file = get_override_file(ctx, service);
     if !override_file.exists() {
         println!("No dependencies to remove");
@@ -293,7 +288,7 @@ async fn remove_deps(ctx: &Context, service: &str, deps_to_remove: &[String]) ->
 }
 
 /// Logic for the `list` action.
-async fn list_deps(ctx: &Context, service: &str) -> Result<()> {
+fn list_deps(ctx: &Context, service: &str) -> Result<()> {
     let service_name = crate::systemd::service::normalize_unit_name(ctx, service);
 
     println!("Dependency tree for {}:", service_name);
@@ -476,5 +471,195 @@ mod tests {
         assert!(content.contains("After="));
         assert!(content.contains("compose@app2.service"));
         assert!(!content.contains("stale.service"));
+    }
+
+    #[test]
+    fn test_parse_override_file_ignores_non_unit_section() {
+        let dir = tempdir().unwrap();
+        let file = dir.path().join("test.conf");
+        let content = "[Service]\nRestart=on-failure\n\n[Unit]\nWants=compose@db.service\n";
+        fs::write(&file, content).unwrap();
+
+        let deps = parse_override_file(&file).unwrap();
+        assert_eq!(deps.get("Wants").unwrap(), &vec!["compose@db.service"]);
+        // Restart is not a Unit key and is in [Service], should be ignored
+        assert!(!deps.contains_key("Restart"));
+    }
+
+    #[test]
+    fn test_parse_override_file_skips_comments() {
+        let dir = tempdir().unwrap();
+        let file = dir.path().join("test.conf");
+        let content = "[Unit]\n# This is a comment\nWants=compose@db.service\n";
+        fs::write(&file, content).unwrap();
+
+        let deps = parse_override_file(&file).unwrap();
+        assert_eq!(deps.get("Wants").unwrap(), &vec!["compose@db.service"]);
+    }
+
+    #[test]
+    fn test_parse_override_file_empty_values() {
+        let dir = tempdir().unwrap();
+        let file = dir.path().join("test.conf");
+        let content = "[Unit]\nWants=\nAfter=compose@db.service\n";
+        fs::write(&file, content).unwrap();
+
+        let deps = parse_override_file(&file).unwrap();
+        // Empty value should be skipped
+        assert!(deps.get("Wants").unwrap().is_empty());
+        assert_eq!(deps.get("After").unwrap(), &vec!["compose@db.service"]);
+    }
+
+    #[test]
+    fn test_parse_override_file_multiple_values_same_key() {
+        let dir = tempdir().unwrap();
+        let file = dir.path().join("test.conf");
+        let content = "[Unit]\nWants=compose@db.service\nWants=compose@cache.service\n";
+        fs::write(&file, content).unwrap();
+
+        let deps = parse_override_file(&file).unwrap();
+        let wants = deps.get("Wants").unwrap();
+        assert_eq!(wants.len(), 2);
+        assert!(wants.contains(&"compose@db.service".to_string()));
+        assert!(wants.contains(&"compose@cache.service".to_string()));
+    }
+
+    #[test]
+    fn test_write_then_parse_roundtrip() {
+        let dir = tempdir().unwrap();
+        let file = dir.path().join("test.conf");
+
+        let mut deps: SystemdDeps = HashMap::new();
+        deps.insert(
+            "Requires".to_string(),
+            vec!["compose@db.service".to_string()],
+        );
+        deps.insert(
+            "Wants".to_string(),
+            vec![
+                "compose@cache.service".to_string(),
+                "compose@queue.service".to_string(),
+            ],
+        );
+        deps.insert("BindsTo".to_string(), vec!["docker.service".to_string()]);
+        deps.insert(
+            "After".to_string(),
+            vec![
+                "compose@db.service".to_string(),
+                "docker.service".to_string(),
+            ],
+        );
+
+        write_override_file(&file, &deps).unwrap();
+        let parsed = parse_override_file(&file).unwrap();
+
+        assert_eq!(parsed.get("Requires").unwrap(), &vec!["compose@db.service"]);
+        assert_eq!(parsed.get("Wants").unwrap().len(), 2);
+        assert_eq!(parsed.get("BindsTo").unwrap(), &vec!["docker.service"]);
+        assert_eq!(parsed.get("After").unwrap().len(), 2);
+    }
+
+    #[test]
+    fn test_write_override_file_empty_deps() {
+        let dir = tempdir().unwrap();
+        let file = dir.path().join("test.conf");
+        let deps: SystemdDeps = HashMap::new();
+
+        write_override_file(&file, &deps).unwrap();
+        let content = fs::read_to_string(&file).unwrap();
+        assert!(content.contains("[Unit]"));
+        // No key=value lines besides [Unit]
+        assert_eq!(content.trim(), "[Unit]");
+    }
+
+    #[test]
+    fn test_apply_dependencies_all_none() {
+        let dir = tempdir().unwrap();
+        let ctx = Context {
+            is_root: false,
+            systemd_dir: dir.path().to_path_buf(),
+            compose_base: dir.path().join("compose"),
+            env_file: dir.path().join("env"),
+            docker_host: None,
+        };
+        fs::create_dir_all(&ctx.compose_base).unwrap();
+
+        let config = crate::compose::dependencies::ServiceConfig {
+            requires: None,
+            wants: None,
+            binds_to: None,
+            after: None,
+        };
+
+        apply_dependencies(&ctx, "myapp", &config).unwrap();
+
+        let override_file = get_override_file(&ctx, "myapp");
+        assert!(override_file.exists());
+
+        let content = fs::read_to_string(&override_file).unwrap();
+        // Should still have docker.service as a standard dependency
+        assert!(content.contains("docker.service"));
+    }
+
+    #[test]
+    fn test_apply_dependencies_binds_to_explicit() {
+        let dir = tempdir().unwrap();
+        let ctx = Context {
+            is_root: false,
+            systemd_dir: dir.path().to_path_buf(),
+            compose_base: dir.path().join("compose"),
+            env_file: dir.path().join("env"),
+            docker_host: None,
+        };
+        fs::create_dir_all(&ctx.compose_base).unwrap();
+        fs::create_dir_all(ctx.compose_base.join("custom")).unwrap();
+
+        let config = crate::compose::dependencies::ServiceConfig {
+            requires: Some(vec!["docker.service".to_string()]),
+            wants: None,
+            binds_to: Some(vec!["custom".to_string()]),
+            after: None,
+        };
+
+        apply_dependencies(&ctx, "myapp", &config).unwrap();
+
+        let override_file = get_override_file(&ctx, "myapp");
+        let content = fs::read_to_string(&override_file).unwrap();
+        // When binds_to is explicitly set, it should use that instead of defaulting to requires
+        assert!(content.contains("BindsTo="));
+        assert!(content.contains("compose@custom.service"));
+    }
+
+    #[test]
+    fn test_get_override_dir_path() {
+        let dir = tempdir().unwrap();
+        let ctx = Context {
+            is_root: false,
+            systemd_dir: dir.path().to_path_buf(),
+            compose_base: dir.path().join("compose"),
+            env_file: dir.path().join("env"),
+            docker_host: None,
+        };
+        fs::create_dir_all(&ctx.compose_base).unwrap();
+        fs::create_dir_all(ctx.compose_base.join("myapp")).unwrap();
+
+        let override_dir = get_override_dir(&ctx, "myapp");
+        assert!(
+            override_dir
+                .to_string_lossy()
+                .contains("compose@myapp.service.d")
+        );
+    }
+
+    #[test]
+    fn test_parse_override_file_no_equals_line() {
+        let dir = tempdir().unwrap();
+        let file = dir.path().join("test.conf");
+        let content = "[Unit]\nSomeGarbageLine\nWants=compose@db.service\n";
+        fs::write(&file, content).unwrap();
+
+        let deps = parse_override_file(&file).unwrap();
+        // The garbage line should be ignored, valid line should parse
+        assert_eq!(deps.get("Wants").unwrap(), &vec!["compose@db.service"]);
     }
 }

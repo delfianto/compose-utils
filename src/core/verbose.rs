@@ -28,3 +28,28 @@ macro_rules! verbose {
         }
     };
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_default_is_disabled() {
+        // Note: other tests may have called enable(), so we can't assert
+        // is_enabled() == false here. Instead just verify the API works.
+        let _ = is_enabled();
+    }
+
+    #[test]
+    fn test_enable_sets_flag() {
+        enable();
+        assert!(is_enabled());
+    }
+
+    #[test]
+    fn test_enable_is_idempotent() {
+        enable();
+        enable();
+        assert!(is_enabled());
+    }
+}

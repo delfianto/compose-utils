@@ -1,9 +1,9 @@
 //! Logic for discovering and resolving systemd services based on the filesystem.
 
-use crate::core::Context;
 use crate::core::COMPOSE_FILES;
+use crate::core::Context;
 use crate::verbose;
-use anyhow::{bail, Result};
+use anyhow::{Result, bail};
 use std::env;
 
 /// Attempts to detect a service name based on the current working directory.
@@ -62,8 +62,8 @@ pub fn resolve_services(ctx: &Context, services: &[String]) -> Result<Vec<String
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use super::super::service::{get_bare_name, get_compose_dir};
+    use super::*;
     use std::fs;
     use std::path::{Path, PathBuf};
 
@@ -201,5 +201,33 @@ mod tests {
 
         let dir = get_compose_dir(&ctx, bare);
         assert_eq!(dir, test_dir.path().join("my-project"));
+    }
+
+    #[test]
+    fn test_resolve_services_single_service() {
+        let test_dir = TestDir::new("resolve-single");
+        let ctx = test_context(test_dir.path());
+        let result = resolve_services(&ctx, &["myapp".to_string()]);
+        assert!(result.is_ok());
+        assert_eq!(result.unwrap(), vec!["myapp"]);
+    }
+
+    #[test]
+    fn test_resolve_services_preserves_order() {
+        let test_dir = TestDir::new("resolve-order");
+        let ctx = test_context(test_dir.path());
+        let input = vec!["zz".to_string(), "aa".to_string(), "mm".to_string()];
+        let result = resolve_services(&ctx, &input).unwrap();
+        assert_eq!(result, vec!["zz", "aa", "mm"]);
+    }
+
+    #[test]
+    fn test_resolve_services_error_message_includes_path() {
+        let test_dir = TestDir::new("resolve-err-path");
+        let ctx = test_context(test_dir.path());
+        let result = resolve_services(&ctx, &[]);
+        assert!(result.is_err());
+        let err = result.unwrap_err().to_string();
+        assert!(err.contains(&test_dir.path().to_string_lossy().to_string()));
     }
 }

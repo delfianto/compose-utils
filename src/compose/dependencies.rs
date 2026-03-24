@@ -116,4 +116,126 @@ mod tests {
         let config = load_dependencies(file.path()).unwrap();
         assert!(config.services.is_empty());
     }
+
+    #[test]
+    fn test_parse_all_fields() {
+        let toml_content = r#"
+            [dependencies.myapp]
+            requires = ["db"]
+            wants = ["cache"]
+            binds_to = ["docker.service"]
+            after = ["network.target"]
+        "#;
+
+        let mut file = NamedTempFile::new().unwrap();
+        write!(file, "{}", toml_content).unwrap();
+
+        let config = load_dependencies(file.path()).unwrap();
+        let myapp = config.services.get("myapp").unwrap();
+        assert_eq!(myapp.requires.as_ref().unwrap(), &vec!["db"]);
+        assert_eq!(myapp.wants.as_ref().unwrap(), &vec!["cache"]);
+        assert_eq!(myapp.binds_to.as_ref().unwrap(), &vec!["docker.service"]);
+        assert_eq!(myapp.after.as_ref().unwrap(), &vec!["network.target"]);
+    }
+
+    #[test]
+    fn test_parse_only_optional_fields() {
+        let toml_content = r#"
+            [dependencies.myapp]
+            wants = ["cache"]
+        "#;
+
+        let mut file = NamedTempFile::new().unwrap();
+        write!(file, "{}", toml_content).unwrap();
+
+        let config = load_dependencies(file.path()).unwrap();
+        let myapp = config.services.get("myapp").unwrap();
+        assert!(myapp.requires.is_none());
+        assert_eq!(myapp.wants.as_ref().unwrap(), &vec!["cache"]);
+        assert!(myapp.binds_to.is_none());
+        assert!(myapp.after.is_none());
+    }
+
+    #[test]
+    fn test_parse_nonexistent_file() {
+        let result = load_dependencies(Path::new("/tmp/nonexistent-deps-file-12345.toml"));
+        assert!(result.is_err());
+        let err = result.unwrap_err().to_string();
+        assert!(err.contains("Failed to read dependency file"));
+    }
+
+    #[test]
+    fn test_parse_invalid_toml() {
+        let mut file = NamedTempFile::new().unwrap();
+        write!(file, "[invalid toml {{{{").unwrap();
+
+        let result = load_dependencies(file.path());
+        assert!(result.is_err());
+        let err = result.unwrap_err().to_string();
+        assert!(err.contains("Failed to parse dependency file"));
+    }
+
+    #[test]
+    fn test_parse_wrong_structure() {
+        // Valid TOML but wrong structure (not under [dependencies])
+        let toml_content = r#"
+            [services.myapp]
+            requires = ["db"]
+        "#;
+
+        let mut file = NamedTempFile::new().unwrap();
+        write!(file, "{}", toml_content).unwrap();
+
+        let config = load_dependencies(file.path()).unwrap();
+        // Should parse but have no services (wrong section name)
+        assert!(config.services.is_empty());
+    }
+
+    #[test]
+    fn test_parse_empty_dependency_lists() {
+        let toml_content = r#"
+            [dependencies.myapp]
+            requires = []
+            wants = []
+        "#;
+
+        let mut file = NamedTempFile::new().unwrap();
+        write!(file, "{}", toml_content).unwrap();
+
+        let config = load_dependencies(file.path()).unwrap();
+        let myapp = config.services.get("myapp").unwrap();
+        assert!(myapp.requires.as_ref().unwrap().is_empty());
+        assert!(myapp.wants.as_ref().unwrap().is_empty());
+    }
+
+    #[test]
+    fn test_parse_many_services() {
+        let mut toml_content = String::new();
+        for i in 0..20 {
+            toml_content.push_str(&format!(
+                "[dependencies.service-{}]\nrequires = [\"dep-{}\"]\n\n",
+                i, i
+            ));
+        }
+
+        let mut file = NamedTempFile::new().unwrap();
+        write!(file, "{}", toml_content).unwrap();
+
+        let config = load_dependencies(file.path()).unwrap();
+        assert_eq!(config.services.len(), 20);
+    }
+
+    #[test]
+    fn test_parse_service_name_with_special_chars() {
+        let toml_content = r#"
+            [dependencies."my-app_v2.0"]
+            requires = ["db"]
+        "#;
+
+        let mut file = NamedTempFile::new().unwrap();
+        write!(file, "{}", toml_content).unwrap();
+
+        let config = load_dependencies(file.path()).unwrap();
+        assert!(config.services.contains_key("my-app_v2.0"));
+    }
 }

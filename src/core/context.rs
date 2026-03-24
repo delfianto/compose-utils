@@ -1,6 +1,6 @@
 //! Core application logic, context management, and environment validation.
 
-use anyhow::{bail, Context as _, Result};
+use anyhow::{Context as _, Result, bail};
 use directories::BaseDirs;
 use nix::unistd::{geteuid, getuid};
 use std::collections::HashMap;
@@ -325,10 +325,12 @@ mod tests {
 
         let result = detect_and_validate_mode(true, &HashMap::new(), &socket_path);
         assert!(result.is_err());
-        assert!(result
-            .unwrap_err()
-            .to_string()
-            .contains("Root privileges detected"));
+        assert!(
+            result
+                .unwrap_err()
+                .to_string()
+                .contains("Root privileges detected")
+        );
     }
 
     #[test]
@@ -361,10 +363,12 @@ mod tests {
 
         let result = detect_and_validate_mode(false, &HashMap::new(), &root_socket);
         assert!(result.is_err());
-        assert!(result
-            .unwrap_err()
-            .to_string()
-            .contains("System-wide Docker socket detected"));
+        assert!(
+            result
+                .unwrap_err()
+                .to_string()
+                .contains("System-wide Docker socket detected")
+        );
     }
 
     #[test]
@@ -384,9 +388,86 @@ mod tests {
 
         let result = detect_and_validate_mode(false, &env_vars, &root_socket);
         assert!(result.is_err());
-        assert!(result
-            .unwrap_err()
-            .to_string()
-            .contains("Rootless docker socket not found"));
+        assert!(
+            result
+                .unwrap_err()
+                .to_string()
+                .contains("Rootless docker socket not found")
+        );
+    }
+
+    #[test]
+    fn test_detect_and_validate_mode_rootless_missing_xdg_runtime() {
+        let dir = tempdir().unwrap();
+        let root_socket = dir.path().join("root_docker.sock");
+        // Root socket does not exist, no XDG_RUNTIME_DIR provided
+        let env_vars = HashMap::new();
+
+        let result = detect_and_validate_mode(false, &env_vars, &root_socket);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("XDG_RUNTIME_DIR"));
+    }
+
+    #[test]
+    fn test_read_env_file_only_comments() {
+        let dir = tempdir().unwrap();
+        let file_path = dir.path().join("comments.env");
+
+        let mut file = File::create(&file_path).unwrap();
+        writeln!(file, "# comment 1").unwrap();
+        writeln!(file, "# comment 2").unwrap();
+        writeln!(file).unwrap();
+        writeln!(file, "  # indented comment").unwrap();
+
+        let config = read_env_file(&file_path).unwrap();
+        assert!(config.is_empty());
+    }
+
+    #[test]
+    fn test_read_env_file_only_empty_lines() {
+        let dir = tempdir().unwrap();
+        let file_path = dir.path().join("empty_lines.env");
+
+        let mut file = File::create(&file_path).unwrap();
+        writeln!(file).unwrap();
+        writeln!(file, "   ").unwrap();
+        writeln!(file).unwrap();
+
+        let config = read_env_file(&file_path).unwrap();
+        assert!(config.is_empty());
+    }
+
+    #[test]
+    fn test_read_env_file_values_with_special_chars() {
+        let dir = tempdir().unwrap();
+        let file_path = dir.path().join("special.env");
+
+        let mut file = File::create(&file_path).unwrap();
+        writeln!(file, "URL=https://example.com:8080/path?query=1&foo=bar").unwrap();
+        writeln!(file, "DOCKER_HOST=unix:///var/run/docker.sock").unwrap();
+
+        let config = read_env_file(&file_path).unwrap();
+        assert_eq!(
+            config.get("URL"),
+            Some(&"https://example.com:8080/path?query=1&foo=bar".to_string())
+        );
+        assert_eq!(
+            config.get("DOCKER_HOST"),
+            Some(&"unix:///var/run/docker.sock".to_string())
+        );
+    }
+
+    #[test]
+    fn test_read_env_file_mixed_crlf_lf() {
+        let dir = tempdir().unwrap();
+        let file_path = dir.path().join("crlf.env");
+
+        // Write with CRLF line endings
+        std::fs::write(&file_path, "KEY1=val1\r\nKEY2=val2\nKEY3=val3\r\n").unwrap();
+
+        let config = read_env_file(&file_path).unwrap();
+        assert_eq!(config.get("KEY1"), Some(&"val1".to_string()));
+        assert_eq!(config.get("KEY2"), Some(&"val2".to_string()));
+        assert_eq!(config.get("KEY3"), Some(&"val3".to_string()));
     }
 }

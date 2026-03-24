@@ -5,36 +5,43 @@ use crate::systemd::discovery::resolve_services;
 use crate::systemd::service::{get_bare_name, get_compose_dir, normalize_unit_name};
 use anyhow::Result;
 
+/// Load and apply dependencies from a TOML file, reloading systemd if any were applied.
+fn apply_deps_from_file(ctx: &Context, deps_path: &str) -> Result<()> {
+    let path = std::path::Path::new(deps_path);
+    println!("Loading dependencies from {}...", path.display());
+
+    let config = crate::compose::dependencies::load_dependencies(path)?;
+    let mut updated = false;
+
+    for (service_name, service_config) in &config.services {
+        let bare = get_bare_name(service_name);
+        let dir = get_compose_dir(ctx, bare);
+
+        if dir.exists() {
+            crate::commands::deps::apply_dependencies(ctx, service_name, service_config)?;
+            updated = true;
+        } else {
+            println!(
+                "Warning: Service '{}' defined in dependency file not found in projects (checked at {}).",
+                service_name,
+                dir.display()
+            );
+        }
+    }
+
+    if updated {
+        crate::systemd::manager::daemon_reload(ctx)?;
+    }
+
+    Ok(())
+}
+
 /// Executes the `start` (or `up`) command with smart image pulling.
-pub async fn run_start(ctx: &Context, names: &[String], deps_path: Option<String>) -> Result<()> {
+pub fn run_start(ctx: &Context, names: &[String], deps_path: Option<String>) -> Result<()> {
     let services = resolve_services(ctx, names)?;
 
     if let Some(path) = deps_path {
-        let path = std::path::Path::new(&path);
-        println!("Loading dependencies from {}...", path.display());
-
-        let config = crate::compose::dependencies::load_dependencies(path)?;
-        let mut updated = false;
-
-        for (service_name, service_config) in &config.services {
-            let bare = get_bare_name(service_name);
-            let dir = get_compose_dir(ctx, bare);
-
-            if dir.exists() {
-                crate::commands::deps::apply_dependencies(ctx, service_name, service_config)?;
-                updated = true;
-            } else {
-                println!(
-                    "Warning: Service '{}' defined in dependency file not found in projects (checked at {}).",
-                    service_name,
-                    dir.display()
-                );
-            }
-        }
-
-        if updated {
-            crate::systemd::manager::daemon_reload(ctx)?;
-        }
+        apply_deps_from_file(ctx, &path)?;
     }
 
     for name in services {
@@ -52,7 +59,7 @@ pub async fn run_start(ctx: &Context, names: &[String], deps_path: Option<String
 }
 
 /// Executes the `stop` (or `down`) command.
-pub async fn run_stop(ctx: &Context, names: &[String]) -> Result<()> {
+pub fn run_stop(ctx: &Context, names: &[String]) -> Result<()> {
     let services = resolve_services(ctx, names)?;
 
     for name in services {
@@ -68,7 +75,7 @@ pub async fn run_stop(ctx: &Context, names: &[String]) -> Result<()> {
 }
 
 /// Executes the `restart` (or `reup`) command.
-pub async fn run_restart(ctx: &Context, names: &[String]) -> Result<()> {
+pub fn run_restart(ctx: &Context, names: &[String]) -> Result<()> {
     let services = resolve_services(ctx, names)?;
 
     for name in services {
@@ -86,7 +93,7 @@ pub async fn run_restart(ctx: &Context, names: &[String]) -> Result<()> {
 }
 
 /// Executes the `status` command for a set of services.
-pub async fn run_status(ctx: &Context, names: &[String]) -> Result<()> {
+pub fn run_status(ctx: &Context, names: &[String]) -> Result<()> {
     let services = resolve_services(ctx, names)?;
 
     if services.is_empty() {
@@ -106,34 +113,11 @@ pub async fn run_status(ctx: &Context, names: &[String]) -> Result<()> {
 }
 
 /// Executes the `enable` command.
-pub async fn run_enable(ctx: &Context, names: &[String], deps_path: Option<String>) -> Result<()> {
+pub fn run_enable(ctx: &Context, names: &[String], deps_path: Option<String>) -> Result<()> {
     let services = resolve_services(ctx, names)?;
 
     if let Some(path) = deps_path {
-        let path = std::path::Path::new(&path);
-        println!("Loading dependencies from {}...", path.display());
-        let config = crate::compose::dependencies::load_dependencies(path)?;
-
-        let mut updated = false;
-        for (service_name, service_config) in &config.services {
-            let bare = get_bare_name(service_name);
-            let dir = get_compose_dir(ctx, bare);
-
-            if dir.exists() {
-                crate::commands::deps::apply_dependencies(ctx, service_name, service_config)?;
-                updated = true;
-            } else {
-                println!(
-                    "Warning: Service '{}' defined in dependency file not found in projects (checked at {}).",
-                    service_name,
-                    dir.display()
-                );
-            }
-        }
-
-        if updated {
-            crate::systemd::manager::daemon_reload(ctx)?;
-        }
+        apply_deps_from_file(ctx, &path)?;
     }
 
     for name in &services {
@@ -148,7 +132,7 @@ pub async fn run_enable(ctx: &Context, names: &[String], deps_path: Option<Strin
 }
 
 /// Executes the `disable` command.
-pub async fn run_disable(ctx: &Context, names: &[String]) -> Result<()> {
+pub fn run_disable(ctx: &Context, names: &[String]) -> Result<()> {
     let services = resolve_services(ctx, names)?;
 
     for name in &services {

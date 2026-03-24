@@ -157,14 +157,15 @@ cargo build --release --quiet
 # 2. Install Binary
 log_info "Installing binary to $BIN_DIR..."
 mkdir -p "$BIN_DIR"
-install -Dm755 "target/release/compose" "$BIN_DIR/compose"
+install -Dm755 "target/release/composectl" "$BIN_DIR/composectl"
+ln -sf "$BIN_DIR/composectl" "$BIN_DIR/compose"
 
 # 3. Install Systemd Unit
 log_info "Installing systemd unit to $SYSTEMD_DIR..."
 mkdir -p "$SYSTEMD_DIR"
 install -Dm644 "systemd/compose@.service" "$SYSTEMD_DIR/compose@.service"
 # Replace placeholder with actual binary path
-sed -i "s|BINARY_PATH|$BIN_DIR/compose|g" "$SYSTEMD_DIR/compose@.service"
+sed -i "s|COMPOSECTL_PATH|$BIN_DIR/composectl|g" "$SYSTEMD_DIR/compose@.service"
 
 # 4. Handle Configuration
 mkdir -p "$CONFIG_DIR"
@@ -227,9 +228,10 @@ $SYSTEMCTL_CMD daemon-reload
 
 echo ""
 log_success "Installation Complete!"
-echo "   - Binary:  $BIN_DIR/compose"
-echo "   - Config:  $CONF_FILE"
-echo "   - Service: $SYSTEMD_DIR/compose@.service"
+echo "   - Binary:     $BIN_DIR/composectl"
+echo "   - Symlink:    $BIN_DIR/compose -> composectl"
+echo "   - Config:     $CONF_FILE"
+echo "   - Service:    $SYSTEMD_DIR/compose@.service"
 
 if [ "$IS_ROOT" = false ]; then
     echo ""

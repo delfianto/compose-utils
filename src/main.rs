@@ -1,10 +1,12 @@
-//! Main entry point for the `compose` utility.
+//! Main entry point for the `compose` / `composectl` multi-call binary.
 //!
-//! This tool provides a systemd-integrated wrapper for managing Docker Compose projects,
-//! supporting both root and rootless Docker environments.
+//! Behavior is determined by argv[0]:
+//! - `compose`    — Direct Docker Compose project operations
+//! - `composectl` — Systemd service controller for Docker Compose projects
 
 use anyhow::Result;
 use clap::{Parser, Subcommand};
+use std::path::PathBuf;
 
 mod commands;
 mod compose;
@@ -15,25 +17,77 @@ mod systemd;
 use crate::commands::{config, deps};
 use crate::core::{enable_verbose, get_context};
 
-/// Command-line interface for managing Docker Compose services with systemd.
+// ---------------------------------------------------------------------------
+// compose persona — direct Docker Compose operations
+// ---------------------------------------------------------------------------
+
+/// Direct Docker Compose project utilities.
 #[derive(Parser)]
 #[command(name = "compose")]
-#[command(about = "Utilities for managing Docker Compose services with Systemd", long_about = None)]
-struct Cli {
+#[command(about = "Docker Compose project utilities", long_about = None)]
+struct ComposeCli {
     /// Enable verbose/debug output.
     #[arg(short, long, global = true)]
     verbose: bool,
 
-    /// The subcommand to execute.
     #[command(subcommand)]
-    command: Commands,
+    command: ComposeCommands,
 }
 
-/// Available subcommands for the application.
 #[derive(Subcommand)]
-enum Commands {
-    /// Start services (systemctl start).
+enum ComposeCommands {
+    /// Start containers (docker compose up -d).
     #[command(visible_alias = "up")]
+    Up {
+        /// List of service names to start.
+        services: Vec<String>,
+    },
+    /// Stop containers (docker compose down).
+    #[command(visible_alias = "down")]
+    Down {
+        /// List of service names to stop.
+        services: Vec<String>,
+    },
+    /// Restart containers (docker compose down + up).
+    #[command(visible_alias = "reup")]
+    Restart {
+        /// List of service names to restart.
+        services: Vec<String>,
+    },
+    /// Pull images for services without restarting.
+    Pull {
+        /// List of service names to pull images for.
+        services: Vec<String>,
+    },
+    /// List Docker containers and their statuses.
+    Ps {
+        /// List of service names to filter by (optional).
+        services: Vec<String>,
+    },
+    /// View or update global configuration.
+    Config(config::ConfigArgs),
+}
+
+// ---------------------------------------------------------------------------
+// composectl persona — systemd service controller
+// ---------------------------------------------------------------------------
+
+/// Systemd service controller for Docker Compose projects.
+#[derive(Parser)]
+#[command(name = "composectl")]
+#[command(about = "Systemd service controller for Docker Compose projects", long_about = None)]
+struct CtlCli {
+    /// Enable verbose/debug output.
+    #[arg(short, long, global = true)]
+    verbose: bool,
+
+    #[command(subcommand)]
+    command: CtlCommands,
+}
+
+#[derive(Subcommand)]
+enum CtlCommands {
+    /// Start services (systemctl start).
     Start {
         /// List of service names to start.
         services: Vec<String>,
@@ -43,18 +97,16 @@ enum Commands {
         deps: Option<String>,
     },
     /// Stop services (systemctl stop).
-    #[command(visible_alias = "down")]
     Stop {
         /// List of service names to stop.
         services: Vec<String>,
     },
     /// Restart services (systemctl restart).
-    #[command(visible_alias = "reup")]
     Restart {
         /// List of service names to restart.
         services: Vec<String>,
     },
-    /// Pull new images and restart services if updated.
+    /// Pull new images and restart services via systemd.
     Update {
         /// List of service names to update.
         services: Vec<String>,
@@ -93,44 +145,72 @@ enum Commands {
     /// View or update global configuration.
     Config(config::ConfigArgs),
 
+    /// Run docker compose up (called by systemd unit).
     #[command(hide = true)]
-    RunService {
-        service: String,
-    },
+    RunService { service: String },
+    /// Run docker compose down (called by systemd unit).
     #[command(hide = true)]
-    StopService {
-        service: String,
-    },
+    StopService { service: String },
 }
 
-/// Entry point of the application.
-///
-/// Parses command-line arguments, initializes the execution context,
-/// and dispatches the command to the appropriate handler.
-#[tokio::main]
-async fn main() -> Result<()> {
-    let cli = Cli::parse();
+// ---------------------------------------------------------------------------
+// Dispatch
+// ---------------------------------------------------------------------------
 
+fn main() -> Result<()> {
+    let binary_name = std::env::args()
+        .next()
+        .and_then(|s| {
+            PathBuf::from(s)
+                .file_name()
+                .map(|f| f.to_string_lossy().into_owned())
+        })
+        .unwrap_or_else(|| "compose".to_string());
+
+    match binary_name.as_str() {
+        "composectl" => run_composectl(),
+        _ => run_compose(),
+    }
+}
+
+fn run_compose() -> Result<()> {
+    let cli = ComposeCli::parse();
     if cli.verbose {
         enable_verbose();
     }
-
     let ctx = get_context()?;
 
     match cli.command {
-        Commands::Start { services, deps } => commands::run_start(&ctx, &services, deps).await,
-        Commands::Stop { services } => commands::run_stop(&ctx, &services).await,
-        Commands::Restart { services } => commands::run_restart(&ctx, &services).await,
-        Commands::Update { services } => commands::run_update(&ctx, &services).await,
-        Commands::Pull { services } => commands::run_pull(&ctx, &services).await,
-        Commands::Status { services } => commands::run_status(&ctx, &services).await,
-        Commands::Enable { services, deps } => commands::run_enable(&ctx, &services, deps).await,
-        Commands::Disable { services } => commands::run_disable(&ctx, &services).await,
-        Commands::Ps { services } => commands::ps::run_ps(&ctx, &services).await,
-        Commands::Deps(args) => deps::run(&ctx, args).await,
-        Commands::Config(args) => config::run(&ctx, args),
+        ComposeCommands::Up { services } => commands::compose_up(&ctx, &services),
+        ComposeCommands::Down { services } => commands::compose_down(&ctx, &services),
+        ComposeCommands::Restart { services } => commands::compose_restart(&ctx, &services),
+        ComposeCommands::Pull { services } => commands::run_pull(&ctx, &services),
+        ComposeCommands::Ps { services } => commands::ps::run_ps(&ctx, &services),
+        ComposeCommands::Config(args) => config::run(&ctx, args),
+    }
+}
 
-        Commands::RunService { service } => commands::internal::run_service(&ctx, &service),
-        Commands::StopService { service } => commands::internal::stop_service(&ctx, &service),
+fn run_composectl() -> Result<()> {
+    let cli = CtlCli::parse();
+    if cli.verbose {
+        enable_verbose();
+    }
+    let ctx = get_context()?;
+
+    match cli.command {
+        CtlCommands::Start { services, deps } => commands::run_start(&ctx, &services, deps),
+        CtlCommands::Stop { services } => commands::run_stop(&ctx, &services),
+        CtlCommands::Restart { services } => commands::run_restart(&ctx, &services),
+        CtlCommands::Update { services } => commands::run_update(&ctx, &services),
+        CtlCommands::Pull { services } => commands::run_pull(&ctx, &services),
+        CtlCommands::Status { services } => commands::run_status(&ctx, &services),
+        CtlCommands::Enable { services, deps } => commands::run_enable(&ctx, &services, deps),
+        CtlCommands::Disable { services } => commands::run_disable(&ctx, &services),
+        CtlCommands::Ps { services } => commands::ps::run_ps(&ctx, &services),
+        CtlCommands::Deps(args) => deps::run(&ctx, args),
+        CtlCommands::Config(args) => config::run(&ctx, args),
+
+        CtlCommands::RunService { service } => commands::internal::run_service(&ctx, &service),
+        CtlCommands::StopService { service } => commands::internal::stop_service(&ctx, &service),
     }
 }

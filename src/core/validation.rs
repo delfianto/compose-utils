@@ -1,20 +1,20 @@
 //! Input validation utilities for configuration values.
 
-use anyhow::{bail, Context as _, Result};
-use once_cell::sync::Lazy;
+use anyhow::{Context as _, Result, bail};
 use regex::Regex;
 use std::net::ToSocketAddrs;
 use std::path::Path;
+use std::sync::LazyLock;
 use url::Url;
 
 /// Regex for validating domain names (RFC 1035 compliant).
-static DOMAIN_RE: Lazy<Regex> = Lazy::new(|| {
+static DOMAIN_RE: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(r"^([a-zA-Z0-9]([a-zA-Z0-9\-]{0,61}[a-zA-Z0-9])?\.)+[a-zA-Z]{2,}$").unwrap()
 });
 
 /// Regex for validating email addresses (simplified RFC 5322).
-static EMAIL_RE: Lazy<Regex> =
-    Lazy::new(|| Regex::new(r"^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$").unwrap());
+static EMAIL_RE: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$").unwrap());
 
 /// Ensures that a path refers to an existing directory.
 pub fn validate_directory(path: &str, field_name: &str) -> Result<()> {

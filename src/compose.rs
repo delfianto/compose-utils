@@ -4,5 +4,3 @@
 //! structures, and extracting image definitions.
 
 pub mod dependencies;
-
-
