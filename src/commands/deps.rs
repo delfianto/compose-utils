@@ -2,7 +2,7 @@
 
 use crate::core::Context;
 use anyhow::Result;
-use clap::Args;
+use clap::{Args, Subcommand};
 use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -10,56 +10,57 @@ use std::path::{Path, PathBuf};
 /// Command-line arguments for the `deps` subcommand.
 #[derive(Args)]
 pub struct DepsArgs {
-    /// The name of the service to manage dependencies for.
-    #[arg(help = "Service name")]
-    pub service: Option<String>,
+    #[command(subcommand)]
+    pub action: DepsAction,
+}
 
-    /// Add one or more services as dependencies.
-    #[arg(long, help = "Add dependencies")]
-    pub add: Option<Vec<String>>,
-
-    /// Remove one or more services from dependencies.
-    #[arg(long, help = "Remove dependencies")]
-    pub remove: Option<Vec<String>>,
-
-    /// List currently configured dependencies for the service.
-    #[arg(long, help = "List dependencies")]
-    pub list: bool,
-
-    /// Use `Requires` instead of `Wants` when adding dependencies.
-    #[arg(long, help = "Use Requires instead of Wants")]
-    pub requires: bool,
-
-    /// Reset all dependencies for the service by removing the override file.
-    #[arg(long, help = "Clear all dependencies")]
-    pub clear: bool,
+#[derive(Subcommand)]
+pub enum DepsAction {
+    /// List dependencies for a service, or all services if none specified.
+    List {
+        /// Service name (omit to list all).
+        service: Option<String>,
+    },
+    /// Add one or more dependencies to a service.
+    Add {
+        /// The service to modify.
+        service: String,
+        /// Dependencies to add.
+        #[arg(required = true)]
+        deps: Vec<String>,
+        /// Use Requires instead of Wants.
+        #[arg(long)]
+        requires: bool,
+    },
+    /// Remove one or more dependencies from a service.
+    Remove {
+        /// The service to modify.
+        service: String,
+        /// Dependencies to remove.
+        #[arg(required = true)]
+        deps: Vec<String>,
+    },
+    /// Clear all dependencies for a service.
+    Clear {
+        /// The service to clear.
+        service: String,
+    },
 }
 
 /// Entry point for the `deps` command.
-///
-/// # Arguments
-///
-/// * `ctx` - The application context.
-/// * `args` - The parsed command arguments.
 pub fn run(ctx: &Context, args: DepsArgs) -> Result<()> {
-    match args.service {
-        Some(service) => {
-            if args.clear {
-                clear_deps(ctx, &service)
-            } else if let Some(deps) = &args.add {
-                add_deps(ctx, &service, deps, args.requires)
-            } else if let Some(deps) = &args.remove {
-                remove_deps(ctx, &service, deps)
-            } else {
-                list_deps(ctx, &service)
-            }
-        }
-        None => {
-            if args.add.is_some() || args.remove.is_some() || args.clear {
-                anyhow::bail!("Cannot modify dependencies without specifying a service.");
-            }
-            list_all_deps(ctx)
-        }
+    match args.action {
+        DepsAction::List { service } => match service {
+            Some(service) => list_deps(ctx, &service),
+            None => list_all_deps(ctx),
+        },
+        DepsAction::Add {
+            service,
+            deps,
+            requires,
+        } => add_deps(ctx, &service, &deps, requires),
+        DepsAction::Remove { service, deps } => remove_deps(ctx, &service, &deps),
+        DepsAction::Clear { service } => clear_deps(ctx, &service),
     }
 }
 
