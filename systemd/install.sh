@@ -158,7 +158,7 @@ cargo build --release --quiet
 log_info "Installing binary to $BIN_DIR..."
 mkdir -p "$BIN_DIR"
 install -Dm755 "target/release/composectl" "$BIN_DIR/composectl"
-ln -sf "$BIN_DIR/composectl" "$BIN_DIR/compose"
+ln -sf "composectl" "$BIN_DIR/compose"
 
 # 3. Install Systemd Unit
 log_info "Installing systemd unit to $SYSTEMD_DIR..."
