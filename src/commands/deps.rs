@@ -191,7 +191,7 @@ fn add_deps(ctx: &Context, service: &str, deps_to_add: &[String], requires: bool
 pub fn apply_dependencies(
     ctx: &Context,
     service: &str,
-    config: &crate::compose::dependencies::ServiceConfig,
+    config: &crate::compose::ServiceConfig,
 ) -> Result<()> {
     let override_dir = get_override_dir(ctx, service);
     let override_file = get_override_file(ctx, service);
@@ -418,7 +418,7 @@ mod tests {
         fs::create_dir_all(ctx.compose_base.join("pgvector")).unwrap();
         fs::create_dir_all(ctx.compose_base.join("ollama")).unwrap();
 
-        let config = crate::compose::dependencies::ServiceConfig {
+        let config = crate::compose::ServiceConfig {
             requires: Some(vec!["pgvector".to_string(), "docker.service".to_string()]),
             wants: Some(vec!["ollama".to_string()]),
             binds_to: None,
@@ -469,7 +469,7 @@ mod tests {
         )
         .unwrap();
 
-        let config = crate::compose::dependencies::ServiceConfig {
+        let config = crate::compose::ServiceConfig {
             requires: Some(vec!["app1".to_string()]),
             wants: None,
             binds_to: None,
@@ -601,7 +601,7 @@ mod tests {
         };
         fs::create_dir_all(&ctx.compose_base).unwrap();
 
-        let config = crate::compose::dependencies::ServiceConfig {
+        let config = crate::compose::ServiceConfig {
             requires: None,
             wants: None,
             binds_to: None,
@@ -635,7 +635,7 @@ mod tests {
         fs::create_dir_all(&ctx.compose_base).unwrap();
         fs::create_dir_all(ctx.compose_base.join("custom")).unwrap();
 
-        let config = crate::compose::dependencies::ServiceConfig {
+        let config = crate::compose::ServiceConfig {
             requires: Some(vec!["docker.service".to_string()]),
             wants: None,
             binds_to: Some(vec!["custom".to_string()]),
@@ -710,7 +710,7 @@ mod tests {
         fs::create_dir_all(ctx.compose_base.join("queue")).unwrap();
         fs::create_dir_all(ctx.compose_base.join("monitor")).unwrap();
 
-        let config = crate::compose::dependencies::ServiceConfig {
+        let config = crate::compose::ServiceConfig {
             requires: Some(vec!["db".to_string()]),
             wants: Some(vec!["cache".to_string()]),
             binds_to: Some(vec!["queue".to_string()]),
@@ -748,7 +748,7 @@ mod tests {
         fs::create_dir_all(&ctx.compose_base).unwrap();
 
         // docker.service is both a standard dep and explicitly required
-        let config = crate::compose::dependencies::ServiceConfig {
+        let config = crate::compose::ServiceConfig {
             requires: Some(vec!["docker.service".to_string()]),
             wants: None,
             binds_to: None,
@@ -782,7 +782,7 @@ mod tests {
         fs::create_dir_all(&ctx.compose_base).unwrap();
         fs::create_dir_all(ctx.compose_base.join("db")).unwrap();
 
-        let config = crate::compose::dependencies::ServiceConfig {
+        let config = crate::compose::ServiceConfig {
             requires: Some(vec!["db".to_string()]),
             wants: None,
             binds_to: None, // Not set, should default from requires
@@ -956,7 +956,7 @@ mod tests {
         fs::create_dir_all(&ctx.compose_base).unwrap();
         fs::create_dir_all(ctx.compose_base.join("optional-svc")).unwrap();
 
-        let config = crate::compose::dependencies::ServiceConfig {
+        let config = crate::compose::ServiceConfig {
             requires: None,
             wants: Some(vec!["optional-svc".to_string()]),
             binds_to: None,
