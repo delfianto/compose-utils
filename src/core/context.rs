@@ -9,6 +9,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use super::constants;
+use super::validation;
 
 /// Represents the runtime environment and configuration for the application.
 ///
@@ -62,6 +63,42 @@ pub fn should_use_infisical(ctx: &Context) -> bool {
         && which::which("infisical").is_ok()
 }
 
+struct InfisicalConfig {
+    project_id: Option<String>,
+    env: Option<String>,
+    address: Option<String>,
+    bootstrap: Vec<String>,
+}
+
+/// Extracts and validates Infisical configuration from a config HashMap.
+fn extract_infisical_config(config: &HashMap<String, String>) -> Result<InfisicalConfig> {
+    let project_id = config.get("INFISICAL_PROJECT_ID").cloned();
+    let env = config.get("INFISICAL_ENV").cloned();
+    let address = config.get("INFISICAL_ADDRESS").cloned();
+
+    if let Some(ref addr) = address {
+        validation::validate_url(addr)?;
+    }
+
+    let bootstrap_raw = config.get("INFISICAL_BOOTSTRAP").cloned().unwrap_or_default();
+    if !bootstrap_raw.is_empty() {
+        validation::validate_bootstrap_list(&bootstrap_raw)?;
+    }
+
+    let bootstrap = bootstrap_raw
+        .split(',')
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
+        .collect();
+
+    Ok(InfisicalConfig {
+        project_id,
+        env,
+        address,
+        bootstrap,
+    })
+}
+
 /// Initializes and returns the application [`Context`].
 ///
 /// This function performs the following steps:
@@ -101,18 +138,7 @@ pub fn get_context() -> Result<Context> {
             .unwrap_or_else(|| PathBuf::from(constants::ROOT_COMPOSE_BASE));
 
         let docker_host = config.get("DOCKER_HOST").cloned();
-        let infisical_project_id = config.get("INFISICAL_PROJECT_ID").cloned();
-        let infisical_env = config.get("INFISICAL_ENV").cloned();
-        let infisical_address = config.get("INFISICAL_ADDRESS").cloned();
-        let infisical_bootstrap = config
-            .get("INFISICAL_BOOTSTRAP")
-            .map(|v| {
-                v.split(',')
-                    .map(|s| s.trim().to_string())
-                    .filter(|s| !s.is_empty())
-                    .collect()
-            })
-            .unwrap_or_default();
+        let infisical = extract_infisical_config(&config)?;
 
         let ctx = Context {
             is_root: true,
@@ -120,10 +146,10 @@ pub fn get_context() -> Result<Context> {
             compose_base,
             env_file,
             docker_host,
-            infisical_project_id,
-            infisical_env,
-            infisical_address,
-            infisical_bootstrap,
+            infisical_project_id: infisical.project_id,
+            infisical_env: infisical.env,
+            infisical_address: infisical.address,
+            infisical_bootstrap: infisical.bootstrap,
         };
 
         verbose!("Systemd dir: {}", ctx.systemd_dir.display());
@@ -172,18 +198,7 @@ pub fn get_context() -> Result<Context> {
         .unwrap_or_else(|| base_dirs.home_dir().join(constants::USER_COMPOSE_BASE_NAME));
 
     let docker_host = config.get("DOCKER_HOST").cloned();
-    let infisical_project_id = config.get("INFISICAL_PROJECT_ID").cloned();
-    let infisical_env = config.get("INFISICAL_ENV").cloned();
-    let infisical_address = config.get("INFISICAL_ADDRESS").cloned();
-    let infisical_bootstrap = config
-        .get("INFISICAL_BOOTSTRAP")
-        .map(|v| {
-            v.split(',')
-                .map(|s| s.trim().to_string())
-                .filter(|s| !s.is_empty())
-                .collect()
-        })
-        .unwrap_or_default();
+    let infisical = extract_infisical_config(&config)?;
 
     let ctx = Context {
         is_root: false,
@@ -191,10 +206,10 @@ pub fn get_context() -> Result<Context> {
         compose_base,
         env_file,
         docker_host,
-        infisical_project_id,
-        infisical_env,
-        infisical_address,
-        infisical_bootstrap,
+        infisical_project_id: infisical.project_id,
+        infisical_env: infisical.env,
+        infisical_address: infisical.address,
+        infisical_bootstrap: infisical.bootstrap,
     };
 
     verbose!("Systemd dir: {}", ctx.systemd_dir.display());
