@@ -311,4 +311,74 @@ mod tests {
         let debug = format!("{:?}", cmd);
         assert!(!debug.contains("INFISICAL_API_URL"));
     }
+
+    // --- run() NO-OP tests ---
+
+    #[test]
+    fn test_run_noop_when_not_configured() {
+        let ctx = ctx_without_infisical();
+        let args = SecretArgs {
+            action: SecretAction::List { service: Some("myapp".to_string()) },
+        };
+        // Should return Ok(()) without attempting any infisical operations
+        let result = run(&ctx, args);
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_run_noop_get_when_not_configured() {
+        let ctx = ctx_without_infisical();
+        let args = SecretArgs {
+            action: SecretAction::Get {
+                key: "MY_KEY".to_string(),
+                service: Some("myapp".to_string()),
+            },
+        };
+        let result = run(&ctx, args);
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_run_noop_set_when_not_configured() {
+        let ctx = ctx_without_infisical();
+        let args = SecretArgs {
+            action: SecretAction::Set {
+                key: "MY_KEY".to_string(),
+                value: "MY_VALUE".to_string(),
+                service: Some("myapp".to_string()),
+            },
+        };
+        let result = run(&ctx, args);
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_run_noop_delete_when_not_configured() {
+        let ctx = ctx_without_infisical();
+        let args = SecretArgs {
+            action: SecretAction::Delete {
+                keys: vec!["KEY1".to_string(), "KEY2".to_string()],
+                service: Some("myapp".to_string()),
+            },
+        };
+        let result = run(&ctx, args);
+        assert!(result.is_ok());
+    }
+
+    // --- resolve edge cases ---
+
+    #[test]
+    fn test_resolve_single_service_bare_name() {
+        let ctx = ctx_with_infisical();
+        let result = resolve_single_service(&ctx, Some("genai-ollama")).unwrap();
+        assert_eq!(result, "genai-ollama");
+    }
+
+    #[test]
+    fn test_resolve_single_service_with_slash() {
+        let ctx = ctx_with_infisical();
+        // get_bare_name doesn't modify names without compose@ prefix
+        let result = resolve_single_service(&ctx, Some("genai/ollama")).unwrap();
+        assert_eq!(result, "genai/ollama");
+    }
 }
