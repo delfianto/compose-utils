@@ -174,4 +174,128 @@ mod tests {
         let formatted = ports.replace(", ", "\n");
         assert_eq!(formatted, "");
     }
+
+    #[test]
+    fn test_deserialize_unicode_names() {
+        let json = r#"{
+            "ID": "abc123",
+            "Image": "myapp:latest",
+            "Names": "my-container-with-unicode-\u00e9",
+            "Ports": "",
+            "State": "running",
+            "Status": "Up 1 hour"
+        }"#;
+
+        let container: DockerContainer = serde_json::from_str(json).unwrap();
+        assert!(container.names.contains("unicode"));
+    }
+
+    #[test]
+    fn test_deserialize_extra_fields_ignored() {
+        let json = r#"{
+            "ID": "abc123",
+            "Image": "nginx:latest",
+            "Names": "web",
+            "Ports": "",
+            "State": "running",
+            "Status": "Up 5 hours",
+            "Labels": "com.docker.compose.project=myapp",
+            "Networks": "bridge",
+            "Mounts": "/data"
+        }"#;
+
+        let container: DockerContainer = serde_json::from_str(json).unwrap();
+        assert_eq!(container.id, "abc123");
+    }
+
+    #[test]
+    fn test_deserialize_created_state() {
+        let json = r#"{
+            "ID": "abc123",
+            "Image": "nginx:latest",
+            "Names": "web",
+            "Ports": "",
+            "State": "created",
+            "Status": "Created"
+        }"#;
+
+        let container: DockerContainer = serde_json::from_str(json).unwrap();
+        assert_eq!(container.state, "created");
+        assert_eq!(container.status, "Created");
+    }
+
+    #[test]
+    fn test_deserialize_paused_state() {
+        let json = r#"{
+            "ID": "def456",
+            "Image": "redis:7",
+            "Names": "cache",
+            "Ports": "6379/tcp",
+            "State": "paused",
+            "Status": "Up 3 hours (Paused)"
+        }"#;
+
+        let container: DockerContainer = serde_json::from_str(json).unwrap();
+        assert_eq!(container.state, "paused");
+    }
+
+    #[test]
+    fn test_deserialize_health_status() {
+        let json = r#"{
+            "ID": "abc123",
+            "Image": "postgres:16",
+            "Names": "db",
+            "Ports": "0.0.0.0:5432->5432/tcp",
+            "State": "running",
+            "Status": "Up 2 hours (healthy)"
+        }"#;
+
+        let container: DockerContainer = serde_json::from_str(json).unwrap();
+        assert!(container.status.contains("healthy"));
+    }
+
+    #[test]
+    fn test_port_formatting_many_ports() {
+        let ports = "0.0.0.0:80->80/tcp, 0.0.0.0:443->443/tcp, 0.0.0.0:8080->8080/tcp, :::80->80/tcp";
+        let formatted = ports.replace(", ", "\n");
+        let lines: Vec<&str> = formatted.lines().collect();
+        assert_eq!(lines.len(), 4);
+    }
+
+    #[test]
+    fn test_port_formatting_ipv6() {
+        let ports = ":::80->80/tcp, :::443->443/tcp";
+        let formatted = ports.replace(", ", "\n");
+        assert_eq!(formatted, ":::80->80/tcp\n:::443->443/tcp");
+    }
+
+    #[test]
+    fn test_deserialize_restarting_state() {
+        let json = r#"{
+            "ID": "abc123",
+            "Image": "myapp:v3",
+            "Names": "worker",
+            "Ports": "",
+            "State": "restarting",
+            "Status": "Restarting (1) 5 seconds ago"
+        }"#;
+
+        let container: DockerContainer = serde_json::from_str(json).unwrap();
+        assert_eq!(container.state, "restarting");
+    }
+
+    #[test]
+    fn test_deserialize_dead_state() {
+        let json = r#"{
+            "ID": "abc123",
+            "Image": "myapp:v1",
+            "Names": "old-worker",
+            "Ports": "",
+            "State": "dead",
+            "Status": "Dead"
+        }"#;
+
+        let container: DockerContainer = serde_json::from_str(json).unwrap();
+        assert_eq!(container.state, "dead");
+    }
 }
