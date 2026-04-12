@@ -9,6 +9,6 @@ pub mod validation;
 pub mod verbose;
 
 pub use constants::*;
-pub use context::{Context, get_context, read_env_file};
+pub use context::{Context, get_context, read_env_file, should_use_infisical};
 pub use validation::*;
 pub use verbose::enable as enable_verbose;
