@@ -981,4 +981,145 @@ mod tests {
         assert!(content.contains("TRAEFIK_ACME_SERVER=https://acme.example.com"));
         assert!(content.contains("DOCKER_HOST=tcp://localhost:2375"));
     }
+
+    // --- Infisical config tests ---
+
+    #[test]
+    fn test_update_infisical_project_id() {
+        let test_dir = TestDir::new("update-infisical-pid");
+        test_dir.write_env("");
+        let ctx = test_dir.context();
+
+        let args = ConfigArgs {
+            compose_data: None,
+            compose_base: None,
+            acme_domain: None,
+            acme_email: None,
+            acme_server: None,
+            docker_host: None,
+            infisical_project_id: Some("proj-abc".to_string()),
+            infisical_env: Some("staging".to_string()),
+            infisical_address: Some("https://infisical.example.com".to_string()),
+            infisical_bootstrap: Some("db/postgres,db/valkey".to_string()),
+        };
+
+        let result = update_config(&ctx, args);
+        assert!(result.is_ok());
+
+        let config = read_config(&ctx).unwrap();
+        assert_eq!(
+            config.get("INFISICAL_PROJECT_ID"),
+            Some(&"proj-abc".to_string())
+        );
+        assert_eq!(config.get("INFISICAL_ENV"), Some(&"staging".to_string()));
+        assert_eq!(
+            config.get("INFISICAL_ADDRESS"),
+            Some(&"https://infisical.example.com".to_string())
+        );
+        assert_eq!(
+            config.get("INFISICAL_BOOTSTRAP"),
+            Some(&"db/postgres,db/valkey".to_string())
+        );
+    }
+
+    #[test]
+    fn test_update_infisical_invalid_address() {
+        let test_dir = TestDir::new("update-infisical-bad-addr");
+        test_dir.write_env("");
+        let ctx = test_dir.context();
+
+        let args = ConfigArgs {
+            compose_data: None,
+            compose_base: None,
+            acme_domain: None,
+            acme_email: None,
+            acme_server: None,
+            docker_host: None,
+            infisical_project_id: None,
+            infisical_env: None,
+            infisical_address: Some("not-a-url".to_string()),
+            infisical_bootstrap: None,
+        };
+
+        let result = update_config(&ctx, args);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_update_infisical_invalid_bootstrap() {
+        let test_dir = TestDir::new("update-infisical-bad-boot");
+        test_dir.write_env("");
+        let ctx = test_dir.context();
+
+        let args = ConfigArgs {
+            compose_data: None,
+            compose_base: None,
+            acme_domain: None,
+            acme_email: None,
+            acme_server: None,
+            docker_host: None,
+            infisical_project_id: None,
+            infisical_env: None,
+            infisical_address: None,
+            infisical_bootstrap: Some("db/postgres,,db/valkey".to_string()),
+        };
+
+        let result = update_config(&ctx, args);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_has_updates_infisical_project_id() {
+        let args = ConfigArgs {
+            compose_data: None,
+            compose_base: None,
+            acme_domain: None,
+            acme_email: None,
+            acme_server: None,
+            docker_host: None,
+            infisical_project_id: Some("abc".to_string()),
+            infisical_env: None,
+            infisical_address: None,
+            infisical_bootstrap: None,
+        };
+        assert!(args.has_updates());
+    }
+
+    #[test]
+    fn test_has_updates_infisical_bootstrap() {
+        let args = ConfigArgs {
+            compose_data: None,
+            compose_base: None,
+            acme_domain: None,
+            acme_email: None,
+            acme_server: None,
+            docker_host: None,
+            infisical_project_id: None,
+            infisical_env: None,
+            infisical_address: None,
+            infisical_bootstrap: Some("db/postgres".to_string()),
+        };
+        assert!(args.has_updates());
+    }
+
+    #[test]
+    fn test_write_config_infisical_keys_ordering() {
+        let test_dir = TestDir::new("write-infisical-order");
+        let ctx = test_dir.context();
+        let mut config = HashMap::new();
+        config.insert("COMPOSE_DATA".to_string(), "/data".to_string());
+        config.insert("INFISICAL_PROJECT_ID".to_string(), "proj-123".to_string());
+        config.insert(
+            "INFISICAL_BOOTSTRAP".to_string(),
+            "db/postgres".to_string(),
+        );
+        write_config(&ctx, &config).unwrap();
+        let content = test_dir.read_env();
+        // Infisical keys should come after COMPOSE_DATA (known-key ordering)
+        let data_pos = content.find("COMPOSE_DATA").unwrap();
+        let pid_pos = content.find("INFISICAL_PROJECT_ID").unwrap();
+        let boot_pos = content.find("INFISICAL_BOOTSTRAP").unwrap();
+        assert!(data_pos < pid_pos);
+        assert!(pid_pos < boot_pos);
+    }
 }

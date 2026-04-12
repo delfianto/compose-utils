@@ -737,4 +737,120 @@ mod tests {
         };
         assert!(!should_use_infisical(&ctx));
     }
+
+    // --- extract_infisical_config tests ---
+
+    #[test]
+    fn test_extract_infisical_config_empty() {
+        let config = HashMap::new();
+        let result = extract_infisical_config(&config).unwrap();
+        assert!(result.project_id.is_none());
+        assert!(result.env.is_none());
+        assert!(result.address.is_none());
+        assert!(result.bootstrap.is_empty());
+    }
+
+    #[test]
+    fn test_extract_infisical_config_all_fields() {
+        let mut config = HashMap::new();
+        config.insert("INFISICAL_PROJECT_ID".to_string(), "proj-123".to_string());
+        config.insert("INFISICAL_ENV".to_string(), "staging".to_string());
+        config.insert(
+            "INFISICAL_ADDRESS".to_string(),
+            "https://infisical.example.com".to_string(),
+        );
+        config.insert(
+            "INFISICAL_BOOTSTRAP".to_string(),
+            "db/postgres,db/valkey,infra/infisical".to_string(),
+        );
+
+        let result = extract_infisical_config(&config).unwrap();
+        assert_eq!(result.project_id, Some("proj-123".to_string()));
+        assert_eq!(result.env, Some("staging".to_string()));
+        assert_eq!(
+            result.address,
+            Some("https://infisical.example.com".to_string())
+        );
+        assert_eq!(result.bootstrap.len(), 3);
+        assert_eq!(result.bootstrap[0], "db/postgres");
+        assert_eq!(result.bootstrap[1], "db/valkey");
+        assert_eq!(result.bootstrap[2], "infra/infisical");
+    }
+
+    #[test]
+    fn test_extract_infisical_config_project_id_only() {
+        let mut config = HashMap::new();
+        config.insert("INFISICAL_PROJECT_ID".to_string(), "proj-123".to_string());
+
+        let result = extract_infisical_config(&config).unwrap();
+        assert_eq!(result.project_id, Some("proj-123".to_string()));
+        assert!(result.env.is_none());
+        assert!(result.address.is_none());
+        assert!(result.bootstrap.is_empty());
+    }
+
+    #[test]
+    fn test_extract_infisical_config_invalid_url() {
+        let mut config = HashMap::new();
+        config.insert(
+            "INFISICAL_ADDRESS".to_string(),
+            "not-a-url".to_string(),
+        );
+
+        let result = extract_infisical_config(&config);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_extract_infisical_config_invalid_bootstrap() {
+        let mut config = HashMap::new();
+        config.insert(
+            "INFISICAL_BOOTSTRAP".to_string(),
+            "db/postgres,,db/valkey".to_string(),
+        );
+
+        let result = extract_infisical_config(&config);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_extract_infisical_config_bootstrap_with_spaces() {
+        let mut config = HashMap::new();
+        config.insert(
+            "INFISICAL_BOOTSTRAP".to_string(),
+            "db/postgres, db/valkey, infra/infisical".to_string(),
+        );
+
+        let result = extract_infisical_config(&config).unwrap();
+        assert_eq!(result.bootstrap.len(), 3);
+        assert_eq!(result.bootstrap[0], "db/postgres");
+        assert_eq!(result.bootstrap[1], "db/valkey");
+    }
+
+    #[test]
+    fn test_extract_infisical_config_ftp_url_rejected() {
+        let mut config = HashMap::new();
+        config.insert(
+            "INFISICAL_ADDRESS".to_string(),
+            "ftp://example.com".to_string(),
+        );
+
+        let result = extract_infisical_config(&config);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_extract_infisical_config_http_url_accepted() {
+        let mut config = HashMap::new();
+        config.insert(
+            "INFISICAL_ADDRESS".to_string(),
+            "http://localhost:8080".to_string(),
+        );
+
+        let result = extract_infisical_config(&config).unwrap();
+        assert_eq!(
+            result.address,
+            Some("http://localhost:8080".to_string())
+        );
+    }
 }
