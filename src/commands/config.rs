@@ -1,8 +1,8 @@
 //! Logic for viewing and updating the tool's configuration (`compose.env`).
 
 use crate::core::{
-    CONFIG_KEYS, Context, read_env_file, validate_acme_server, validate_directory,
-    validate_docker_host, validate_domain, validate_email,
+    CONFIG_KEYS, Context, read_env_file, validate_acme_server, validate_bootstrap_list,
+    validate_directory, validate_docker_host, validate_domain, validate_email, validate_url,
 };
 use anyhow::{Context as _, Result};
 use clap::Args;
@@ -35,6 +35,22 @@ pub struct ConfigArgs {
     /// Set the DOCKER_HOST URI.
     #[arg(long, help = "Set DOCKER_HOST")]
     pub docker_host: Option<String>,
+
+    /// Set the Infisical project ID.
+    #[arg(long, help = "Set Infisical project ID")]
+    pub infisical_project_id: Option<String>,
+
+    /// Set the Infisical environment (e.g., production, staging).
+    #[arg(long, help = "Set Infisical environment")]
+    pub infisical_env: Option<String>,
+
+    /// Set the Infisical server address.
+    #[arg(long, help = "Set Infisical server address")]
+    pub infisical_address: Option<String>,
+
+    /// Set bootstrap services that skip Infisical (comma-separated).
+    #[arg(long, help = "Set bootstrap services (comma-separated)")]
+    pub infisical_bootstrap: Option<String>,
 }
 
 /// Entry point for the `config` command.
@@ -63,6 +79,10 @@ impl ConfigArgs {
             || self.acme_email.is_some()
             || self.acme_server.is_some()
             || self.docker_host.is_some()
+            || self.infisical_project_id.is_some()
+            || self.infisical_env.is_some()
+            || self.infisical_address.is_some()
+            || self.infisical_bootstrap.is_some()
     }
 }
 
@@ -171,6 +191,24 @@ fn update_config(ctx: &Context, args: ConfigArgs) -> Result<()> {
         config.insert("DOCKER_HOST".to_string(), value.clone());
     }
 
+    if let Some(ref value) = args.infisical_project_id {
+        config.insert("INFISICAL_PROJECT_ID".to_string(), value.clone());
+    }
+
+    if let Some(ref value) = args.infisical_env {
+        config.insert("INFISICAL_ENV".to_string(), value.clone());
+    }
+
+    if let Some(ref value) = args.infisical_address {
+        validate_url(value)?;
+        config.insert("INFISICAL_ADDRESS".to_string(), value.clone());
+    }
+
+    if let Some(ref value) = args.infisical_bootstrap {
+        validate_bootstrap_list(value)?;
+        config.insert("INFISICAL_BOOTSTRAP".to_string(), value.clone());
+    }
+
     write_config(ctx, &config)?;
     println!("Configuration updated successfully.");
 
@@ -208,6 +246,10 @@ mod tests {
                 compose_base: self.base.clone(),
                 env_file: self.env_file(),
                 docker_host: None,
+                infisical_project_id: None,
+                infisical_env: None,
+                infisical_address: None,
+                infisical_bootstrap: vec![],
             }
         }
 
@@ -241,6 +283,10 @@ mod tests {
             acme_email: None,
             acme_server: None,
             docker_host: None,
+            infisical_project_id: None,
+            infisical_env: None,
+            infisical_address: None,
+            infisical_bootstrap: None,
         };
         assert!(!args.has_updates());
     }
@@ -254,6 +300,10 @@ mod tests {
             acme_email: None,
             acme_server: None,
             docker_host: None,
+            infisical_project_id: None,
+            infisical_env: None,
+            infisical_address: None,
+            infisical_bootstrap: None,
         };
         assert!(args.has_updates());
     }
@@ -267,6 +317,10 @@ mod tests {
             acme_email: None,
             acme_server: None,
             docker_host: None,
+            infisical_project_id: None,
+            infisical_env: None,
+            infisical_address: None,
+            infisical_bootstrap: None,
         };
         assert!(args.has_updates());
     }
@@ -280,6 +334,10 @@ mod tests {
             acme_email: None,
             acme_server: None,
             docker_host: None,
+            infisical_project_id: None,
+            infisical_env: None,
+            infisical_address: None,
+            infisical_bootstrap: None,
         };
         assert!(args.has_updates());
     }
@@ -293,6 +351,10 @@ mod tests {
             acme_email: None,
             acme_server: None,
             docker_host: None,
+            infisical_project_id: None,
+            infisical_env: None,
+            infisical_address: None,
+            infisical_bootstrap: None,
         };
         assert!(args.has_updates());
     }
@@ -518,6 +580,10 @@ mod tests {
             acme_email: None,
             acme_server: None,
             docker_host: None,
+            infisical_project_id: None,
+            infisical_env: None,
+            infisical_address: None,
+            infisical_bootstrap: None,
         };
 
         let result = update_config(&ctx, args);
@@ -546,6 +612,10 @@ mod tests {
             acme_email: Some("admin@example.com".to_string()),
             acme_server: None,
             docker_host: None,
+            infisical_project_id: None,
+            infisical_env: None,
+            infisical_address: None,
+            infisical_bootstrap: None,
         };
 
         let result = update_config(&ctx, args);
@@ -583,6 +653,10 @@ mod tests {
             acme_email: None,
             acme_server: None,
             docker_host: None,
+            infisical_project_id: None,
+            infisical_env: None,
+            infisical_address: None,
+            infisical_bootstrap: None,
         };
 
         let result = update_config(&ctx, args);
@@ -602,6 +676,10 @@ mod tests {
             acme_email: None,
             acme_server: None,
             docker_host: None,
+            infisical_project_id: None,
+            infisical_env: None,
+            infisical_address: None,
+            infisical_bootstrap: None,
         };
 
         let result = update_config(&ctx, args);
@@ -621,6 +699,10 @@ mod tests {
             acme_email: Some("not an email".to_string()),
             acme_server: None,
             docker_host: None,
+            infisical_project_id: None,
+            infisical_env: None,
+            infisical_address: None,
+            infisical_bootstrap: None,
         };
 
         let result = update_config(&ctx, args);
@@ -640,6 +722,10 @@ mod tests {
             acme_email: None,
             acme_server: None,
             docker_host: Some("invalid".to_string()),
+            infisical_project_id: None,
+            infisical_env: None,
+            infisical_address: None,
+            infisical_bootstrap: None,
         };
 
         let result = update_config(&ctx, args);
@@ -659,6 +745,10 @@ mod tests {
             acme_email: None,
             acme_server: None,
             docker_host: Some("tcp://localhost:2375".to_string()),
+            infisical_project_id: None,
+            infisical_env: None,
+            infisical_address: None,
+            infisical_bootstrap: None,
         };
 
         let result = update_config(&ctx, args);
@@ -669,5 +759,226 @@ mod tests {
             config.get("DOCKER_HOST"),
             Some(&"tcp://localhost:2375".to_string())
         );
+    }
+
+    // --- show_config tests ---
+
+    #[test]
+    fn test_show_config_file_not_found() {
+        let test_dir = TestDir::new("show-not-found");
+        let ctx = test_dir.context();
+        // Don't create the env file
+        let result = show_config(&ctx);
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_show_config_empty_file() {
+        let test_dir = TestDir::new("show-empty");
+        test_dir.write_env("");
+        let ctx = test_dir.context();
+        let result = show_config(&ctx);
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_show_config_with_known_keys() {
+        let test_dir = TestDir::new("show-known");
+        test_dir.write_env(
+            "COMPOSE_DATA=/data\n\
+             COMPOSE_BASE=/base\n\
+             TRAEFIK_ACME_DOMAIN=example.com\n",
+        );
+        let ctx = test_dir.context();
+        let result = show_config(&ctx);
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_show_config_with_extra_keys() {
+        let test_dir = TestDir::new("show-extra");
+        test_dir.write_env(
+            "COMPOSE_DATA=/data\n\
+             CUSTOM_KEY=custom_value\n\
+             ANOTHER_KEY=another_value\n",
+        );
+        let ctx = test_dir.context();
+        let result = show_config(&ctx);
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_show_config_all_keys() {
+        let test_dir = TestDir::new("show-all");
+        test_dir.write_env(
+            "COMPOSE_DATA=/data\n\
+             COMPOSE_BASE=/base\n\
+             TRAEFIK_ACME_DOMAIN=example.com\n\
+             TRAEFIK_ACME_EMAIL=admin@example.com\n\
+             TRAEFIK_ACME_SERVER=https://acme.example.com\n\
+             DOCKER_HOST=tcp://localhost:2375\n",
+        );
+        let ctx = test_dir.context();
+        let result = show_config(&ctx);
+        assert!(result.is_ok());
+    }
+
+    // --- run() dispatch tests ---
+
+    #[test]
+    fn test_run_dispatches_to_show_config() {
+        let test_dir = TestDir::new("run-show");
+        test_dir.write_env("COMPOSE_DATA=/data\n");
+        let ctx = test_dir.context();
+
+        let args = ConfigArgs {
+            compose_data: None,
+            compose_base: None,
+            acme_domain: None,
+            acme_email: None,
+            acme_server: None,
+            docker_host: None,
+            infisical_project_id: None,
+            infisical_env: None,
+            infisical_address: None,
+            infisical_bootstrap: None,
+        };
+
+        let result = run(&ctx, args);
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_run_dispatches_to_update_config() {
+        let test_dir = TestDir::new("run-update");
+        let subdir = test_dir.create_subdir("data");
+        test_dir.write_env("");
+        let ctx = test_dir.context();
+
+        let args = ConfigArgs {
+            compose_data: Some(subdir.to_str().unwrap().to_string()),
+            compose_base: None,
+            acme_domain: None,
+            acme_email: None,
+            acme_server: None,
+            docker_host: None,
+            infisical_project_id: None,
+            infisical_env: None,
+            infisical_address: None,
+            infisical_bootstrap: None,
+        };
+
+        let result = run(&ctx, args);
+        assert!(result.is_ok());
+    }
+
+    // --- has_updates individual field tests ---
+
+    #[test]
+    fn test_has_updates_acme_email() {
+        let args = ConfigArgs {
+            compose_data: None,
+            compose_base: None,
+            acme_domain: None,
+            acme_email: Some("admin@example.com".to_string()),
+            acme_server: None,
+            docker_host: None,
+            infisical_project_id: None,
+            infisical_env: None,
+            infisical_address: None,
+            infisical_bootstrap: None,
+        };
+        assert!(args.has_updates());
+    }
+
+    #[test]
+    fn test_has_updates_acme_server() {
+        let args = ConfigArgs {
+            compose_data: None,
+            compose_base: None,
+            acme_domain: None,
+            acme_email: None,
+            acme_server: Some("https://acme.example.com".to_string()),
+            docker_host: None,
+            infisical_project_id: None,
+            infisical_env: None,
+            infisical_address: None,
+            infisical_bootstrap: None,
+        };
+        assert!(args.has_updates());
+    }
+
+    #[test]
+    fn test_has_updates_docker_host() {
+        let args = ConfigArgs {
+            compose_data: None,
+            compose_base: None,
+            acme_domain: None,
+            acme_email: None,
+            acme_server: None,
+            docker_host: Some("tcp://localhost:2375".to_string()),
+            infisical_project_id: None,
+            infisical_env: None,
+            infisical_address: None,
+            infisical_bootstrap: None,
+        };
+        assert!(args.has_updates());
+    }
+
+    // --- update_config validation edge cases ---
+
+    #[test]
+    fn test_update_fails_on_invalid_acme_server() {
+        let test_dir = TestDir::new("update-invalid-acme");
+        test_dir.write_env("");
+        let ctx = test_dir.context();
+
+        let args = ConfigArgs {
+            compose_data: None,
+            compose_base: None,
+            acme_domain: None,
+            acme_email: None,
+            acme_server: Some("ftp://invalid".to_string()),
+            docker_host: None,
+            infisical_project_id: None,
+            infisical_env: None,
+            infisical_address: None,
+            infisical_bootstrap: None,
+        };
+
+        let result = update_config(&ctx, args);
+        assert!(result.is_err());
+    }
+
+    // --- write_config edge cases ---
+
+    #[test]
+    fn test_write_config_all_known_keys() {
+        let test_dir = TestDir::new("write-all");
+        let ctx = test_dir.context();
+        let mut config = HashMap::new();
+        config.insert("COMPOSE_DATA".to_string(), "/data".to_string());
+        config.insert("COMPOSE_BASE".to_string(), "/base".to_string());
+        config.insert("TRAEFIK_ACME_DOMAIN".to_string(), "example.com".to_string());
+        config.insert(
+            "TRAEFIK_ACME_EMAIL".to_string(),
+            "admin@example.com".to_string(),
+        );
+        config.insert(
+            "TRAEFIK_ACME_SERVER".to_string(),
+            "https://acme.example.com".to_string(),
+        );
+        config.insert(
+            "DOCKER_HOST".to_string(),
+            "tcp://localhost:2375".to_string(),
+        );
+        write_config(&ctx, &config).unwrap();
+        let content = test_dir.read_env();
+        assert!(content.contains("COMPOSE_DATA=/data"));
+        assert!(content.contains("COMPOSE_BASE=/base"));
+        assert!(content.contains("TRAEFIK_ACME_DOMAIN=example.com"));
+        assert!(content.contains("TRAEFIK_ACME_EMAIL=admin@example.com"));
+        assert!(content.contains("TRAEFIK_ACME_SERVER=https://acme.example.com"));
+        assert!(content.contains("DOCKER_HOST=tcp://localhost:2375"));
     }
 }

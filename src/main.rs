@@ -65,7 +65,7 @@ enum ComposeCommands {
         services: Vec<String>,
     },
     /// View or update global configuration.
-    Config(config::ConfigArgs),
+    Config(Box<config::ConfigArgs>),
 }
 
 // ---------------------------------------------------------------------------
@@ -143,7 +143,7 @@ enum CtlCommands {
     /// Manage service dependencies.
     Deps(deps::DepsArgs),
     /// View or update global configuration.
-    Config(config::ConfigArgs),
+    Config(Box<config::ConfigArgs>),
 
     /// Run docker compose up (called by systemd unit).
     #[command(hide = true)]
@@ -186,7 +186,7 @@ fn run_compose() -> Result<()> {
         ComposeCommands::Restart { services } => commands::compose_restart(&ctx, &services),
         ComposeCommands::Pull { services } => commands::run_pull(&ctx, &services),
         ComposeCommands::Ps { services } => commands::ps::run_ps(&ctx, &services),
-        ComposeCommands::Config(args) => config::run(&ctx, args),
+        ComposeCommands::Config(args) => config::run(&ctx, *args),
     }
 }
 
@@ -208,7 +208,7 @@ fn run_composectl() -> Result<()> {
         CtlCommands::Disable { services } => commands::run_disable(&ctx, &services),
         CtlCommands::Ps { services } => commands::ps::run_ps(&ctx, &services),
         CtlCommands::Deps(args) => deps::run(&ctx, args),
-        CtlCommands::Config(args) => config::run(&ctx, args),
+        CtlCommands::Config(args) => config::run(&ctx, *args),
 
         CtlCommands::RunService { service } => commands::internal::run_service(&ctx, &service),
         CtlCommands::StopService { service } => commands::internal::stop_service(&ctx, &service),
