@@ -9,6 +9,7 @@ pub mod deps;
 pub mod internal;
 pub mod ps;
 pub mod pull;
+pub mod secret;
 pub mod service;
 pub mod update;
 
