@@ -26,6 +26,40 @@ pub struct Context {
     pub env_file: PathBuf,
     /// Optional Docker host URI (e.g., unix:///var/run/docker.sock).
     pub docker_host: Option<String>,
+    /// Optional Infisical project ID for secret injection.
+    pub infisical_project_id: Option<String>,
+    /// Optional Infisical environment name (defaults to "production").
+    pub infisical_env: Option<String>,
+    /// Optional Infisical server address.
+    pub infisical_address: Option<String>,
+    /// Bootstrap services that skip Infisical injection (Tier 0).
+    pub infisical_bootstrap: Vec<String>,
+}
+
+impl Context {
+    /// Returns true if the given bare service name is a bootstrap (Tier 0) service
+    /// that should not use Infisical secret injection.
+    ///
+    /// Normalizes both the input and the bootstrap list entries by replacing
+    /// '/' with '-', so "db/postgres" and "db-postgres" both match.
+    pub fn is_bootstrap_service(&self, bare_name: &str) -> bool {
+        let normalized = bare_name.replace('/', "-");
+        self.infisical_bootstrap
+            .iter()
+            .any(|b| b.replace('/', "-") == normalized)
+    }
+}
+
+/// Returns true if Infisical integration should be used.
+///
+/// Three conditions must all be true:
+/// 1. `INFISICAL_PROJECT_ID` is configured (feature is enabled)
+/// 2. `INFISICAL_TOKEN` env var exists (authentication is available)
+/// 3. `infisical` binary is in PATH (CLI is installed)
+pub fn should_use_infisical(ctx: &Context) -> bool {
+    ctx.infisical_project_id.is_some()
+        && env::var("INFISICAL_TOKEN").is_ok()
+        && which::which("infisical").is_ok()
 }
 
 /// Initializes and returns the application [`Context`].
@@ -67,6 +101,18 @@ pub fn get_context() -> Result<Context> {
             .unwrap_or_else(|| PathBuf::from(constants::ROOT_COMPOSE_BASE));
 
         let docker_host = config.get("DOCKER_HOST").cloned();
+        let infisical_project_id = config.get("INFISICAL_PROJECT_ID").cloned();
+        let infisical_env = config.get("INFISICAL_ENV").cloned();
+        let infisical_address = config.get("INFISICAL_ADDRESS").cloned();
+        let infisical_bootstrap = config
+            .get("INFISICAL_BOOTSTRAP")
+            .map(|v| {
+                v.split(',')
+                    .map(|s| s.trim().to_string())
+                    .filter(|s| !s.is_empty())
+                    .collect()
+            })
+            .unwrap_or_default();
 
         let ctx = Context {
             is_root: true,
@@ -74,6 +120,10 @@ pub fn get_context() -> Result<Context> {
             compose_base,
             env_file,
             docker_host,
+            infisical_project_id,
+            infisical_env,
+            infisical_address,
+            infisical_bootstrap,
         };
 
         verbose!("Systemd dir: {}", ctx.systemd_dir.display());
@@ -81,6 +131,18 @@ pub fn get_context() -> Result<Context> {
         verbose!("Env file: {}", ctx.env_file.display());
         if let Some(ref host) = ctx.docker_host {
             verbose!("Docker host: {}", host);
+        }
+        if let Some(ref pid) = ctx.infisical_project_id {
+            verbose!("Infisical project: {}", pid);
+        }
+        if let Some(ref ienv) = ctx.infisical_env {
+            verbose!("Infisical env: {}", ienv);
+        }
+        if let Some(ref addr) = ctx.infisical_address {
+            verbose!("Infisical address: {}", addr);
+        }
+        if !ctx.infisical_bootstrap.is_empty() {
+            verbose!("Infisical bootstrap: {:?}", ctx.infisical_bootstrap);
         }
 
         return Ok(ctx);
@@ -110,6 +172,18 @@ pub fn get_context() -> Result<Context> {
         .unwrap_or_else(|| base_dirs.home_dir().join(constants::USER_COMPOSE_BASE_NAME));
 
     let docker_host = config.get("DOCKER_HOST").cloned();
+    let infisical_project_id = config.get("INFISICAL_PROJECT_ID").cloned();
+    let infisical_env = config.get("INFISICAL_ENV").cloned();
+    let infisical_address = config.get("INFISICAL_ADDRESS").cloned();
+    let infisical_bootstrap = config
+        .get("INFISICAL_BOOTSTRAP")
+        .map(|v| {
+            v.split(',')
+                .map(|s| s.trim().to_string())
+                .filter(|s| !s.is_empty())
+                .collect()
+        })
+        .unwrap_or_default();
 
     let ctx = Context {
         is_root: false,
@@ -117,6 +191,10 @@ pub fn get_context() -> Result<Context> {
         compose_base,
         env_file,
         docker_host,
+        infisical_project_id,
+        infisical_env,
+        infisical_address,
+        infisical_bootstrap,
     };
 
     verbose!("Systemd dir: {}", ctx.systemd_dir.display());
@@ -124,6 +202,18 @@ pub fn get_context() -> Result<Context> {
     verbose!("Env file: {}", ctx.env_file.display());
     if let Some(ref host) = ctx.docker_host {
         verbose!("Docker host: {}", host);
+    }
+    if let Some(ref pid) = ctx.infisical_project_id {
+        verbose!("Infisical project: {}", pid);
+    }
+    if let Some(ref ienv) = ctx.infisical_env {
+        verbose!("Infisical env: {}", ienv);
+    }
+    if let Some(ref addr) = ctx.infisical_address {
+        verbose!("Infisical address: {}", addr);
+    }
+    if !ctx.infisical_bootstrap.is_empty() {
+        verbose!("Infisical bootstrap: {:?}", ctx.infisical_bootstrap);
     }
 
     Ok(ctx)
@@ -469,5 +559,167 @@ mod tests {
         assert_eq!(config.get("KEY1"), Some(&"val1".to_string()));
         assert_eq!(config.get("KEY2"), Some(&"val2".to_string()));
         assert_eq!(config.get("KEY3"), Some(&"val3".to_string()));
+    }
+
+    #[test]
+    fn test_read_env_file_inline_comment_not_stripped() {
+        // Inline comments are NOT stripped per the current implementation
+        let dir = tempdir().unwrap();
+        let file_path = dir.path().join("inline.env");
+
+        let mut file = File::create(&file_path).unwrap();
+        writeln!(file, "KEY=value # inline comment").unwrap();
+
+        let config = read_env_file(&file_path).unwrap();
+        // The value includes the inline comment because split_once('=') takes everything after '='
+        assert_eq!(
+            config.get("KEY"),
+            Some(&"value # inline comment".to_string())
+        );
+    }
+
+    #[test]
+    fn test_read_env_file_duplicate_keys_last_wins() {
+        let dir = tempdir().unwrap();
+        let file_path = dir.path().join("dupes.env");
+
+        let mut file = File::create(&file_path).unwrap();
+        writeln!(file, "KEY=first").unwrap();
+        writeln!(file, "KEY=second").unwrap();
+        writeln!(file, "KEY=third").unwrap();
+
+        let config = read_env_file(&file_path).unwrap();
+        assert_eq!(config.get("KEY"), Some(&"third".to_string()));
+    }
+
+    #[test]
+    fn test_read_env_file_utf8_values() {
+        let dir = tempdir().unwrap();
+        let file_path = dir.path().join("utf8.env");
+
+        std::fs::write(&file_path, "GREETING=\u{00E9}l\u{00E8}ve\nCITY=Z\u{00FC}rich\n").unwrap();
+
+        let config = read_env_file(&file_path).unwrap();
+        assert_eq!(config.get("GREETING"), Some(&"\u{00E9}l\u{00E8}ve".to_string()));
+        assert_eq!(config.get("CITY"), Some(&"Z\u{00FC}rich".to_string()));
+    }
+
+    #[test]
+    fn test_read_env_file_empty_key_with_value() {
+        let dir = tempdir().unwrap();
+        let file_path = dir.path().join("emptykey.env");
+
+        let mut file = File::create(&file_path).unwrap();
+        writeln!(file, "=some_value").unwrap();
+
+        let config = read_env_file(&file_path).unwrap();
+        assert_eq!(config.get(""), Some(&"some_value".to_string()));
+    }
+
+    #[test]
+    fn test_detect_and_validate_mode_root_returns_correct_path() {
+        let dir = tempdir().unwrap();
+        let socket_path = dir.path().join("docker.sock");
+        File::create(&socket_path).unwrap();
+
+        let result = detect_and_validate_mode(true, &HashMap::new(), &socket_path).unwrap();
+        assert_eq!(result, socket_path);
+    }
+
+    #[test]
+    fn test_detect_and_validate_mode_rootless_returns_user_socket() {
+        let dir = tempdir().unwrap();
+        let root_socket = dir.path().join("root_docker.sock");
+        // Root socket does not exist
+
+        let runtime_dir = dir.path().join("runtime");
+        std::fs::create_dir(&runtime_dir).unwrap();
+        let user_socket = runtime_dir.join(constants::USER_DOCKER_SOCKET_NAME);
+        File::create(&user_socket).unwrap();
+
+        let mut env_vars = HashMap::new();
+        env_vars.insert(
+            "XDG_RUNTIME_DIR".to_string(),
+            runtime_dir.to_string_lossy().to_string(),
+        );
+
+        let result = detect_and_validate_mode(false, &env_vars, &root_socket).unwrap();
+        assert_eq!(result, user_socket);
+    }
+
+    // --- is_bootstrap_service tests ---
+
+    fn ctx_with_bootstrap() -> Context {
+        Context {
+            is_root: false,
+            systemd_dir: PathBuf::from("/tmp"),
+            compose_base: PathBuf::from("/tmp"),
+            env_file: PathBuf::from("/tmp/compose.env"),
+            docker_host: None,
+            infisical_project_id: None,
+            infisical_env: None,
+            infisical_address: None,
+            infisical_bootstrap: vec![
+                "db/postgres".to_string(),
+                "db/valkey".to_string(),
+                "infra/infisical".to_string(),
+            ],
+        }
+    }
+
+    #[test]
+    fn test_is_bootstrap_service_dash_input() {
+        let ctx = ctx_with_bootstrap();
+        assert!(ctx.is_bootstrap_service("db-postgres"));
+        assert!(ctx.is_bootstrap_service("db-valkey"));
+        assert!(ctx.is_bootstrap_service("infra-infisical"));
+    }
+
+    #[test]
+    fn test_is_bootstrap_service_slash_input() {
+        let ctx = ctx_with_bootstrap();
+        assert!(ctx.is_bootstrap_service("db/postgres"));
+        assert!(ctx.is_bootstrap_service("db/valkey"));
+        assert!(ctx.is_bootstrap_service("infra/infisical"));
+    }
+
+    #[test]
+    fn test_is_bootstrap_service_not_in_list() {
+        let ctx = ctx_with_bootstrap();
+        assert!(!ctx.is_bootstrap_service("db-mariadb"));
+        assert!(!ctx.is_bootstrap_service("ai-ollama"));
+        assert!(!ctx.is_bootstrap_service("media-immich"));
+    }
+
+    #[test]
+    fn test_is_bootstrap_service_empty_list() {
+        let ctx = Context {
+            is_root: false,
+            systemd_dir: PathBuf::from("/tmp"),
+            compose_base: PathBuf::from("/tmp"),
+            env_file: PathBuf::from("/tmp/compose.env"),
+            docker_host: None,
+            infisical_project_id: None,
+            infisical_env: None,
+            infisical_address: None,
+            infisical_bootstrap: vec![],
+        };
+        assert!(!ctx.is_bootstrap_service("db-postgres"));
+    }
+
+    #[test]
+    fn test_should_use_infisical_no_project_id() {
+        let ctx = Context {
+            is_root: false,
+            systemd_dir: PathBuf::from("/tmp"),
+            compose_base: PathBuf::from("/tmp"),
+            env_file: PathBuf::from("/tmp/compose.env"),
+            docker_host: None,
+            infisical_project_id: None,
+            infisical_env: None,
+            infisical_address: None,
+            infisical_bootstrap: vec![],
+        };
+        assert!(!should_use_infisical(&ctx));
     }
 }

@@ -331,6 +331,10 @@ mod tests {
             compose_base: dir.path().join("compose"),
             env_file: dir.path().join("env"),
             docker_host: None,
+            infisical_project_id: None,
+            infisical_env: None,
+            infisical_address: None,
+            infisical_bootstrap: vec![],
         };
         fs::create_dir_all(&ctx.compose_base).unwrap();
         fs::create_dir_all(ctx.compose_base.join("myapp")).unwrap();
@@ -404,6 +408,10 @@ mod tests {
             compose_base: dir.path().join("compose"),
             env_file: dir.path().join("env"),
             docker_host: None,
+            infisical_project_id: None,
+            infisical_env: None,
+            infisical_address: None,
+            infisical_bootstrap: vec![],
         };
 
         fs::create_dir_all(&ctx.compose_base).unwrap();
@@ -444,6 +452,10 @@ mod tests {
             compose_base: dir.path().join("compose"),
             env_file: dir.path().join("env"),
             docker_host: None,
+            infisical_project_id: None,
+            infisical_env: None,
+            infisical_address: None,
+            infisical_bootstrap: vec![],
         };
         fs::create_dir_all(&ctx.compose_base).unwrap();
         fs::create_dir_all(ctx.compose_base.join("app1")).unwrap();
@@ -582,6 +594,10 @@ mod tests {
             compose_base: dir.path().join("compose"),
             env_file: dir.path().join("env"),
             docker_host: None,
+            infisical_project_id: None,
+            infisical_env: None,
+            infisical_address: None,
+            infisical_bootstrap: vec![],
         };
         fs::create_dir_all(&ctx.compose_base).unwrap();
 
@@ -611,6 +627,10 @@ mod tests {
             compose_base: dir.path().join("compose"),
             env_file: dir.path().join("env"),
             docker_host: None,
+            infisical_project_id: None,
+            infisical_env: None,
+            infisical_address: None,
+            infisical_bootstrap: vec![],
         };
         fs::create_dir_all(&ctx.compose_base).unwrap();
         fs::create_dir_all(ctx.compose_base.join("custom")).unwrap();
@@ -640,6 +660,10 @@ mod tests {
             compose_base: dir.path().join("compose"),
             env_file: dir.path().join("env"),
             docker_host: None,
+            infisical_project_id: None,
+            infisical_env: None,
+            infisical_address: None,
+            infisical_bootstrap: vec![],
         };
         fs::create_dir_all(&ctx.compose_base).unwrap();
         fs::create_dir_all(ctx.compose_base.join("myapp")).unwrap();
@@ -662,5 +686,291 @@ mod tests {
         let deps = parse_override_file(&file).unwrap();
         // The garbage line should be ignored, valid line should parse
         assert_eq!(deps.get("Wants").unwrap(), &vec!["compose@db.service"]);
+    }
+
+    // --- apply_dependencies corner cases ---
+
+    #[test]
+    fn test_apply_dependencies_all_fields_populated() {
+        let dir = tempdir().unwrap();
+        let ctx = Context {
+            is_root: false,
+            systemd_dir: dir.path().to_path_buf(),
+            compose_base: dir.path().join("compose"),
+            env_file: dir.path().join("env"),
+            docker_host: None,
+            infisical_project_id: None,
+            infisical_env: None,
+            infisical_address: None,
+            infisical_bootstrap: vec![],
+        };
+        fs::create_dir_all(&ctx.compose_base).unwrap();
+        fs::create_dir_all(ctx.compose_base.join("db")).unwrap();
+        fs::create_dir_all(ctx.compose_base.join("cache")).unwrap();
+        fs::create_dir_all(ctx.compose_base.join("queue")).unwrap();
+        fs::create_dir_all(ctx.compose_base.join("monitor")).unwrap();
+
+        let config = crate::compose::dependencies::ServiceConfig {
+            requires: Some(vec!["db".to_string()]),
+            wants: Some(vec!["cache".to_string()]),
+            binds_to: Some(vec!["queue".to_string()]),
+            after: Some(vec!["monitor".to_string()]),
+        };
+
+        apply_dependencies(&ctx, "myapp", &config).unwrap();
+
+        let override_file = get_override_file(&ctx, "myapp");
+        let content = fs::read_to_string(&override_file).unwrap();
+
+        assert!(content.contains("Requires=compose@db.service"));
+        assert!(content.contains("Requires=docker.service"));
+        assert!(content.contains("Wants=compose@cache.service"));
+        assert!(content.contains("BindsTo=compose@queue.service"));
+        assert!(content.contains("After=compose@monitor.service"));
+        // When binds_to is explicitly set, requires should NOT be copied to binds_to
+        assert!(!content.contains("BindsTo=compose@db.service"));
+    }
+
+    #[test]
+    fn test_apply_dependencies_requires_duplicates_standard() {
+        let dir = tempdir().unwrap();
+        let ctx = Context {
+            is_root: false,
+            systemd_dir: dir.path().to_path_buf(),
+            compose_base: dir.path().join("compose"),
+            env_file: dir.path().join("env"),
+            docker_host: None,
+            infisical_project_id: None,
+            infisical_env: None,
+            infisical_address: None,
+            infisical_bootstrap: vec![],
+        };
+        fs::create_dir_all(&ctx.compose_base).unwrap();
+
+        // docker.service is both a standard dep and explicitly required
+        let config = crate::compose::dependencies::ServiceConfig {
+            requires: Some(vec!["docker.service".to_string()]),
+            wants: None,
+            binds_to: None,
+            after: None,
+        };
+
+        apply_dependencies(&ctx, "myapp", &config).unwrap();
+
+        let override_file = get_override_file(&ctx, "myapp");
+        let content = fs::read_to_string(&override_file).unwrap();
+
+        // docker.service should appear exactly once in Requires
+        let requires_count = content.matches("Requires=docker.service").count();
+        assert_eq!(requires_count, 1, "docker.service should not be duplicated");
+    }
+
+    #[test]
+    fn test_apply_dependencies_defaults_binds_to_from_requires() {
+        let dir = tempdir().unwrap();
+        let ctx = Context {
+            is_root: false,
+            systemd_dir: dir.path().to_path_buf(),
+            compose_base: dir.path().join("compose"),
+            env_file: dir.path().join("env"),
+            docker_host: None,
+            infisical_project_id: None,
+            infisical_env: None,
+            infisical_address: None,
+            infisical_bootstrap: vec![],
+        };
+        fs::create_dir_all(&ctx.compose_base).unwrap();
+        fs::create_dir_all(ctx.compose_base.join("db")).unwrap();
+
+        let config = crate::compose::dependencies::ServiceConfig {
+            requires: Some(vec!["db".to_string()]),
+            wants: None,
+            binds_to: None, // Not set, should default from requires
+            after: None,
+        };
+
+        apply_dependencies(&ctx, "myapp", &config).unwrap();
+
+        let override_file = get_override_file(&ctx, "myapp");
+        let content = fs::read_to_string(&override_file).unwrap();
+
+        // BindsTo should include db since binds_to was None
+        assert!(content.contains("BindsTo=compose@db.service"));
+    }
+
+    // --- parse_override_file corner cases ---
+
+    #[test]
+    fn test_parse_override_file_unknown_keys_in_unit() {
+        let dir = tempdir().unwrap();
+        let file = dir.path().join("test.conf");
+        let content =
+            "[Unit]\nDescription=My Service\nWants=compose@db.service\nConditionPathExists=/tmp\n";
+        fs::write(&file, content).unwrap();
+
+        let deps = parse_override_file(&file).unwrap();
+        assert_eq!(deps.get("Wants").unwrap(), &vec!["compose@db.service"]);
+        // Unknown keys should be stored too (entry().or_default())
+        assert_eq!(
+            deps.get("Description").unwrap(),
+            &vec!["My Service".to_string()]
+        );
+        assert_eq!(
+            deps.get("ConditionPathExists").unwrap(),
+            &vec!["/tmp".to_string()]
+        );
+    }
+
+    #[test]
+    fn test_parse_override_file_all_four_keys() {
+        let dir = tempdir().unwrap();
+        let file = dir.path().join("test.conf");
+        let content = "[Unit]\n\
+                        Requires=docker.service\n\
+                        Wants=compose@cache.service\n\
+                        BindsTo=compose@db.service\n\
+                        After=docker.service\n\
+                        After=compose@db.service\n";
+        fs::write(&file, content).unwrap();
+
+        let deps = parse_override_file(&file).unwrap();
+        assert_eq!(
+            deps.get("Requires").unwrap(),
+            &vec!["docker.service".to_string()]
+        );
+        assert_eq!(
+            deps.get("Wants").unwrap(),
+            &vec!["compose@cache.service".to_string()]
+        );
+        assert_eq!(
+            deps.get("BindsTo").unwrap(),
+            &vec!["compose@db.service".to_string()]
+        );
+        assert_eq!(deps.get("After").unwrap().len(), 2);
+    }
+
+    // --- write_override_file corner cases ---
+
+    #[test]
+    fn test_write_override_file_all_four_keys() {
+        let dir = tempdir().unwrap();
+        let file = dir.path().join("test.conf");
+        let mut deps: SystemdDeps = HashMap::new();
+        deps.insert(
+            "Requires".to_string(),
+            vec!["docker.service".to_string()],
+        );
+        deps.insert(
+            "Wants".to_string(),
+            vec!["compose@cache.service".to_string()],
+        );
+        deps.insert(
+            "BindsTo".to_string(),
+            vec!["compose@db.service".to_string()],
+        );
+        deps.insert(
+            "After".to_string(),
+            vec![
+                "docker.service".to_string(),
+                "compose@db.service".to_string(),
+            ],
+        );
+
+        write_override_file(&file, &deps).unwrap();
+        let content = fs::read_to_string(&file).unwrap();
+
+        // Verify order: Requires, Wants, BindsTo, After
+        let req_pos = content.find("Requires=").unwrap();
+        let wants_pos = content.find("Wants=").unwrap();
+        let binds_pos = content.find("BindsTo=").unwrap();
+        let after_pos = content.find("After=").unwrap();
+        assert!(req_pos < wants_pos);
+        assert!(wants_pos < binds_pos);
+        assert!(binds_pos < after_pos);
+    }
+
+    #[test]
+    fn test_write_override_file_only_after() {
+        let dir = tempdir().unwrap();
+        let file = dir.path().join("test.conf");
+        let mut deps: SystemdDeps = HashMap::new();
+        deps.insert("Requires".to_string(), Vec::new());
+        deps.insert("Wants".to_string(), Vec::new());
+        deps.insert("BindsTo".to_string(), Vec::new());
+        deps.insert(
+            "After".to_string(),
+            vec!["docker.service".to_string()],
+        );
+
+        write_override_file(&file, &deps).unwrap();
+        let content = fs::read_to_string(&file).unwrap();
+
+        assert!(content.contains("[Unit]"));
+        assert!(content.contains("After=docker.service"));
+        assert!(!content.contains("Requires="));
+        assert!(!content.contains("Wants="));
+        assert!(!content.contains("BindsTo="));
+    }
+
+    // --- get_override_file path tests ---
+
+    #[test]
+    fn test_get_override_file_path() {
+        let dir = tempdir().unwrap();
+        let ctx = Context {
+            is_root: false,
+            systemd_dir: dir.path().to_path_buf(),
+            compose_base: dir.path().join("compose"),
+            env_file: dir.path().join("env"),
+            docker_host: None,
+            infisical_project_id: None,
+            infisical_env: None,
+            infisical_address: None,
+            infisical_bootstrap: vec![],
+        };
+        fs::create_dir_all(&ctx.compose_base).unwrap();
+        fs::create_dir_all(ctx.compose_base.join("myapp")).unwrap();
+
+        let override_file = get_override_file(&ctx, "myapp");
+        assert!(
+            override_file
+                .to_string_lossy()
+                .ends_with("compose@myapp.service.d/dependencies.conf")
+        );
+    }
+
+    #[test]
+    fn test_apply_dependencies_only_wants() {
+        let dir = tempdir().unwrap();
+        let ctx = Context {
+            is_root: false,
+            systemd_dir: dir.path().to_path_buf(),
+            compose_base: dir.path().join("compose"),
+            env_file: dir.path().join("env"),
+            docker_host: None,
+            infisical_project_id: None,
+            infisical_env: None,
+            infisical_address: None,
+            infisical_bootstrap: vec![],
+        };
+        fs::create_dir_all(&ctx.compose_base).unwrap();
+        fs::create_dir_all(ctx.compose_base.join("optional-svc")).unwrap();
+
+        let config = crate::compose::dependencies::ServiceConfig {
+            requires: None,
+            wants: Some(vec!["optional-svc".to_string()]),
+            binds_to: None,
+            after: None,
+        };
+
+        apply_dependencies(&ctx, "myapp", &config).unwrap();
+
+        let override_file = get_override_file(&ctx, "myapp");
+        let content = fs::read_to_string(&override_file).unwrap();
+
+        assert!(content.contains("Wants=compose@optional-svc.service"));
+        // Standard deps still present
+        assert!(content.contains("Requires=docker.service"));
+        assert!(content.contains("BindsTo=docker.service"));
     }
 }
