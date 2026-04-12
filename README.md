@@ -11,6 +11,7 @@ Two tools, one binary — for managing Docker Compose projects.
 - **Automatic Project Detection**: Run commands from inside a project directory without specifying the service name
 - **Dependency Management**: Configure systemd inter-service dependencies via TOML files or CLI
 - **Configuration Management**: Validate and update environment variables via `compose config`
+- **Secret Injection**: Optional Infisical integration to inject secrets into compose services at startup
 
 ## Installation
 
@@ -98,6 +99,10 @@ compose config --acme-email user@example.com
 | `TRAEFIK_ACME_DOMAIN` | Domain for SSL certificates |
 | `TRAEFIK_ACME_EMAIL` | Contact email for Let's Encrypt |
 | `TRAEFIK_ACME_SERVER` | ACME server URL |
+| `INFISICAL_PROJECT_ID` | Infisical project ID (enables secret injection) |
+| `INFISICAL_ENV` | Infisical environment (default: `production`) |
+| `INFISICAL_ADDRESS` | Infisical server URL |
+| `INFISICAL_BOOTSTRAP` | Comma-separated bootstrap services that skip Infisical |
 
 ## Documentation
 
@@ -118,7 +123,7 @@ Detailed technical documentation is in the [`docs/`](docs/) directory:
 # Build
 cargo build --release
 
-# Run tests (206 tests)
+# Run tests
 cargo test
 
 # The binary is at target/release/composectl
