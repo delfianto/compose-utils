@@ -10,7 +10,7 @@ fn apply_deps_from_file(ctx: &Context, deps_path: &str) -> Result<()> {
     let path = std::path::Path::new(deps_path);
     println!("Loading dependencies from {}...", path.display());
 
-    let config = crate::compose::dependencies::load_dependencies(path)?;
+    let config = crate::compose::load_dependencies(path)?;
     let mut updated = false;
 
     for (service_name, service_config) in &config.services {
