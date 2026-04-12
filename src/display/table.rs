@@ -1,3 +1,10 @@
+use regex::Regex;
+use std::sync::LazyLock;
+
+/// Regex for stripping ANSI escape codes from strings.
+static ANSI_RE: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"\x1B\[[0-9;]*[a-zA-Z]").unwrap());
+
 /// Simple table formatter for CLI output.
 pub struct Table {
     headers: Vec<String>,
@@ -99,8 +106,7 @@ impl Table {
     }
 
     fn strip_ansi(&self, s: &str) -> String {
-        let re = regex::Regex::new(r"\x1B\[[0-9;]*[a-zA-Z]").unwrap();
-        re.replace_all(s, "").to_string()
+        ANSI_RE.replace_all(s, "").to_string()
     }
 }
 
