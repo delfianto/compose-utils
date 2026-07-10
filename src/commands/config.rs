@@ -124,13 +124,34 @@ fn write_config(ctx: &Context, config: &HashMap<String, String>) -> Result<()> {
 
 /// Formats and prints the current configuration to stdout.
 fn show_config(ctx: &Context) -> Result<()> {
+    let json = crate::core::is_json();
+
     if !ctx.env_file.exists() {
-        println!("Config file not found: {}", ctx.env_file.display());
-        println!("Run the installer to generate the config file.");
+        if json {
+            crate::core::print_json(&serde_json::json!({
+                "command": "config",
+                "path": ctx.env_file.to_string_lossy(),
+                "exists": false,
+                "config": {},
+            }))?;
+        } else {
+            println!("Config file not found: {}", ctx.env_file.display());
+            println!("Run the installer to generate the config file.");
+        }
         return Ok(());
     }
 
     let config = read_config(ctx)?;
+
+    if json {
+        crate::core::print_json(&serde_json::json!({
+            "command": "config",
+            "path": ctx.env_file.to_string_lossy(),
+            "exists": true,
+            "config": config,
+        }))?;
+        return Ok(());
+    }
 
     if config.is_empty() {
         println!("Config file is empty: {}", ctx.env_file.display());
@@ -210,7 +231,16 @@ fn update_config(ctx: &Context, args: ConfigArgs) -> Result<()> {
     }
 
     write_config(ctx, &config)?;
-    println!("Configuration updated successfully.");
+
+    if crate::core::is_json() {
+        crate::core::print_json(&serde_json::json!({
+            "command": "config",
+            "status": "updated",
+            "path": ctx.env_file.to_string_lossy(),
+        }))?;
+    } else {
+        println!("Configuration updated successfully.");
+    }
 
     Ok(())
 }

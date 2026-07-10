@@ -50,7 +50,9 @@ pub fn resolve_services(ctx: &Context, services: &[String]) -> Result<Vec<String
     }
 
     if let Some(service) = detect_service_from_cwd(ctx) {
-        println!("Auto-detected service: {}", service);
+        if !crate::core::is_json() {
+            println!("Auto-detected service: {}", service);
+        }
         return Ok(vec![service]);
     }
 

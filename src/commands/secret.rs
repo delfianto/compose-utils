@@ -57,6 +57,13 @@ pub enum SecretAction {
 /// Entry point for the `secret` command.
 pub fn run(ctx: &Context, args: SecretArgs) -> Result<()> {
     if !check_infisical_available(ctx) {
+        if crate::core::is_json() {
+            crate::core::print_json(&serde_json::json!({
+                "command": "secret",
+                "status": "noop",
+                "reason": "infisical not configured or not available",
+            }))?;
+        }
         return Ok(());
     }
 
@@ -139,6 +146,23 @@ fn infisical_base_cmd(ctx: &Context, bare: &str) -> Command {
 fn list_secrets(ctx: &Context, bare: &str) -> Result<()> {
     let mut cmd = infisical_base_cmd(ctx, bare);
 
+    // infisical's own list rendering isn't ours to control, so in JSON mode
+    // we capture it instead of inheriting stdio and nest it as raw text
+    // rather than let it pollute stdout alongside our JSON.
+    if crate::core::is_json() {
+        let output = cmd.output()?;
+        if !output.status.success() {
+            bail!("Failed to list secrets for {}", bare);
+        }
+        crate::core::print_json(&serde_json::json!({
+            "command": "secret",
+            "action": "list",
+            "service": bare,
+            "raw": String::from_utf8_lossy(&output.stdout),
+        }))?;
+        return Ok(());
+    }
+
     let status = cmd.status()?;
     if !status.success() {
         bail!("Failed to list secrets for {}", bare);
@@ -160,6 +184,21 @@ fn get_secret(ctx: &Context, bare: &str, key: &str) -> Result<()> {
 
     if let Some(ref addr) = ctx.infisical_address {
         cmd.env("INFISICAL_API_URL", addr);
+    }
+
+    if crate::core::is_json() {
+        let output = cmd.output()?;
+        if !output.status.success() {
+            bail!("Failed to get secret '{}' for {}", key, bare);
+        }
+        crate::core::print_json(&serde_json::json!({
+            "command": "secret",
+            "action": "get",
+            "service": bare,
+            "key": key,
+            "raw": String::from_utf8_lossy(&output.stdout),
+        }))?;
+        return Ok(());
     }
 
     let status = cmd.status()?;
@@ -186,6 +225,21 @@ fn set_secret(ctx: &Context, bare: &str, key: &str, value: &str) -> Result<()> {
         cmd.env("INFISICAL_API_URL", addr);
     }
 
+    if crate::core::is_json() {
+        let output = cmd.output()?;
+        if !output.status.success() {
+            bail!("Failed to set secret '{}' for {}", key, bare);
+        }
+        crate::core::print_json(&serde_json::json!({
+            "command": "secret",
+            "action": "set",
+            "service": bare,
+            "key": key,
+            "status": "ok",
+        }))?;
+        return Ok(());
+    }
+
     let status = cmd.status()?;
     if !status.success() {
         bail!("Failed to set secret '{}' for {}", key, bare);
@@ -209,6 +263,21 @@ fn delete_secrets(ctx: &Context, bare: &str, keys: &[String]) -> Result<()> {
 
     if let Some(ref addr) = ctx.infisical_address {
         cmd.env("INFISICAL_API_URL", addr);
+    }
+
+    if crate::core::is_json() {
+        let output = cmd.output()?;
+        if !output.status.success() {
+            bail!("Failed to delete secret(s) for {}", bare);
+        }
+        crate::core::print_json(&serde_json::json!({
+            "command": "secret",
+            "action": "delete",
+            "service": bare,
+            "keys": keys,
+            "status": "ok",
+        }))?;
+        return Ok(());
     }
 
     let status = cmd.status()?;

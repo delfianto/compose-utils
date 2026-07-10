@@ -66,10 +66,24 @@ pub fn run(ctx: &Context, args: DepsArgs) -> Result<()> {
 
 fn clear_deps(ctx: &Context, service: &str) -> Result<()> {
     let override_file = get_override_file(ctx, service);
+    let json = crate::core::is_json();
+
     if override_file.exists() {
-        println!("Clearing dependencies for {}...", service);
+        if !json {
+            println!("Clearing dependencies for {}...", service);
+        }
         fs::remove_file(&override_file)?;
         crate::systemd::manager::daemon_reload(ctx)?;
+
+        if json {
+            crate::core::print_json(&serde_json::json!({
+                "command": "deps", "action": "clear", "service": service, "status": "cleared",
+            }))?;
+        }
+    } else if json {
+        crate::core::print_json(&serde_json::json!({
+            "command": "deps", "action": "clear", "service": service, "status": "noop",
+        }))?;
     } else {
         println!("No dependencies found for {}", service);
     }
@@ -77,7 +91,83 @@ fn clear_deps(ctx: &Context, service: &str) -> Result<()> {
 }
 
 fn list_all_deps(ctx: &Context) -> Result<()> {
+    if crate::core::is_json() {
+        let graph = build_dependency_graph(ctx, "docker.service")?;
+        crate::core::print_json(&serde_json::json!({
+            "command": "deps",
+            "action": "list",
+            "edges": graph.edges,
+            "states": graph.states,
+        }))?;
+        return Ok(());
+    }
     crate::systemd::manager::list_dependencies(ctx, None)
+}
+
+/// A flat reverse-dependency graph rooted at some unit (see
+/// [`build_dependency_graph`]).
+struct DependencyGraph {
+    /// unit -> its direct reverse-dependents (units that require/want it).
+    edges: std::collections::BTreeMap<String, Vec<String>>,
+    /// unit -> its current `ActiveState`.
+    states: std::collections::BTreeMap<String, String>,
+}
+
+/// Returns true if `unit` is one of this tool's own `compose@*.service` units.
+fn is_compose_unit(unit: &str) -> bool {
+    unit.starts_with("compose@") && unit.ends_with(".service")
+}
+
+/// Builds the reverse-dependency graph rooted at `root`, following the same
+/// edges `systemctl list-dependencies --reverse` would (`RequiredBy=`,
+/// `WantedBy=`, `UpheldBy=`, `PartOf=`, `BoundBy=`), fetched via `systemctl
+/// show` -- systemd's documented machine-parsable interface -- rather than
+/// by parsing that command's human-oriented tree/bullet rendering.
+///
+/// Two departures from a literal port of that tree:
+/// - The result is a flat `unit -> [dependents]` map, not a nested tree,
+///   since the underlying relationship is a DAG: a unit like a shared
+///   database can legitimately have more than one dependent, and forcing
+///   that into a tree means duplicating it under every parent.
+/// - Traversal only follows into `compose@*.service` units. Every unit here
+///   is also implicitly `WantedBy=default.target` (that's just what "enabled"
+///   means) and `Requires=`/`BindsTo=docker.service`, so leaving those in
+///   would add a `default.target` (and `docker.service`) leaf under nearly
+///   every node without conveying any information beyond "this is enabled".
+///   Only edges between the compose services this tool actually manages are
+///   kept.
+fn build_dependency_graph(ctx: &Context, root: &str) -> Result<DependencyGraph> {
+    let mut edges = std::collections::BTreeMap::new();
+    let mut states = std::collections::BTreeMap::new();
+    let mut visited = std::collections::HashSet::new();
+    let mut queue = std::collections::VecDeque::new();
+
+    visited.insert(root.to_string());
+    queue.push_back(root.to_string());
+
+    while let Some(unit) = queue.pop_front() {
+        let props = crate::systemd::manager::get_unit_properties(ctx, &unit)?;
+        states.insert(
+            unit.clone(),
+            props.get("ActiveState").cloned().unwrap_or_else(|| "unknown".to_string()),
+        );
+
+        let mut dependents: Vec<String> = crate::systemd::manager::get_reverse_dependents(ctx, &unit)?
+            .into_iter()
+            .filter(|u| is_compose_unit(u))
+            .collect();
+        dependents.sort();
+
+        for dep in &dependents {
+            if visited.insert(dep.clone()) {
+                queue.push_back(dep.clone());
+            }
+        }
+
+        edges.insert(unit, dependents);
+    }
+
+    Ok(DependencyGraph { edges, states })
 }
 
 /// Returns the path to the systemd drop-in override directory for a service.
@@ -176,7 +266,18 @@ fn add_deps(ctx: &Context, service: &str, deps_to_add: &[String], requires: bool
     }
 
     write_override_file(&override_file, &current_deps)?;
-    println!("Added dependencies to {}", service);
+
+    if crate::core::is_json() {
+        crate::core::print_json(&serde_json::json!({
+            "command": "deps",
+            "action": "add",
+            "service": service,
+            "added": deps_to_add,
+            "type": dep_type,
+        }))?;
+    } else {
+        println!("Added dependencies to {}", service);
+    }
 
     crate::systemd::manager::daemon_reload(ctx)?;
 
@@ -261,8 +362,16 @@ fn update_deps_list(ctx: &Context, deps: &mut SystemdDeps, key: &str, items: &[S
 /// Logic for the `remove` action.
 fn remove_deps(ctx: &Context, service: &str, deps_to_remove: &[String]) -> Result<()> {
     let override_file = get_override_file(ctx, service);
+    let json = crate::core::is_json();
+
     if !override_file.exists() {
-        println!("No dependencies to remove");
+        if json {
+            crate::core::print_json(&serde_json::json!({
+                "command": "deps", "action": "remove", "service": service, "status": "noop",
+            }))?;
+        } else {
+            println!("No dependencies to remove");
+        }
         return Ok(());
     }
 
@@ -281,7 +390,18 @@ fn remove_deps(ctx: &Context, service: &str, deps_to_remove: &[String]) -> Resul
     }
 
     write_override_file(&override_file, &current_deps)?;
-    println!("Removed dependencies from {}", service);
+
+    if json {
+        crate::core::print_json(&serde_json::json!({
+            "command": "deps",
+            "action": "remove",
+            "service": service,
+            "status": "removed",
+            "removed": deps_to_remove,
+        }))?;
+    } else {
+        println!("Removed dependencies from {}", service);
+    }
 
     crate::systemd::manager::daemon_reload(ctx)?;
 
@@ -291,17 +411,41 @@ fn remove_deps(ctx: &Context, service: &str, deps_to_remove: &[String]) -> Resul
 /// Logic for the `list` action.
 fn list_deps(ctx: &Context, service: &str) -> Result<()> {
     let service_name = crate::systemd::service::normalize_unit_name(ctx, service);
+    let json = crate::core::is_json();
 
-    println!("Dependency tree for {}:", service_name);
-    if let Err(e) = crate::systemd::manager::list_dependencies(ctx, Some(&service_name)) {
-        println!("  Failed to retrieve dependency tree: {}", e);
-    }
+    let graph = if json {
+        Some(build_dependency_graph(ctx, &service_name)?)
+    } else {
+        println!("Dependency tree for {}:", service_name);
+        if let Err(e) = crate::systemd::manager::list_dependencies(ctx, Some(&service_name)) {
+            println!("  Failed to retrieve dependency tree: {}", e);
+        }
+        None
+    };
 
     // Also show explicit overrides if they exist
     let override_file = get_override_file(ctx, service);
-    if override_file.exists() {
+    let overrides = if override_file.exists() {
+        Some(parse_override_file(&override_file)?)
+    } else {
+        None
+    };
+
+    if json {
+        let graph = graph.expect("graph is always built in JSON mode");
+        crate::core::print_json(&serde_json::json!({
+            "command": "deps",
+            "action": "list",
+            "service": service_name,
+            "edges": graph.edges,
+            "states": graph.states,
+            "overrides": overrides,
+        }))?;
+        return Ok(());
+    }
+
+    if let Some(deps) = overrides {
         println!("\nExplicit overrides in {}:", override_file.display());
-        let deps = parse_override_file(&override_file)?;
         for key in ["Requires", "Wants", "After"] {
             if let Some(v) = deps.get(key) {
                 if !v.is_empty() {

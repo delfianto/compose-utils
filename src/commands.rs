@@ -15,5 +15,7 @@ pub mod update;
 
 pub use compose_direct::{compose_down, compose_restart, compose_up};
 pub use pull::run_pull;
-pub use service::{run_disable, run_enable, run_restart, run_start, run_status, run_stop};
+pub use service::{
+    run_disable, run_enable, run_restart, run_start, run_status, run_stop, run_sync,
+};
 pub use update::run_update;

@@ -35,7 +35,7 @@ main.rs
  +-- commands/
  |    +-- compose_direct.rs   (compose: up, down, restart)
  |    +-- service.rs          (composectl: start, stop, restart, status, enable, disable)
- |    +-- ps.rs               (shared: container listing)
+ |    +-- ps.rs               (compose: container listing)
  |    +-- pull.rs             (shared: image pulling)
  |    +-- update.rs           (composectl: pull + systemd restart)
  |    +-- config.rs           (shared: configuration management)
@@ -47,6 +47,7 @@ main.rs
  |    +-- context.rs          (Context struct, env file parsing, mode detection)
  |    +-- validation.rs       (domain, email, URL, path validators)
  |    +-- verbose.rs          (global debug flag + macro)
+ |    +-- output.rs           (global JSON-mode flag, Report<T> envelope, print_json)
  |
  +-- systemd/
  |    +-- manager.rs          (systemctl command wrappers)
@@ -189,16 +190,16 @@ The tool installs a **parameterized unit template** `compose@.service`:
 
 ```ini
 [Service]
-Type=oneshot
-RemainAfterExit=yes
+Type=simple
 ExecStart=/path/to/composectl run-service %i
 ExecStop=/path/to/composectl stop-service %i
 ```
 
 - `%i` is the instance parameter (e.g., `myapp` from `compose@myapp.service`).
-- `Type=oneshot` with `RemainAfterExit=yes` means systemd considers the service "active" after `ExecStart` completes, even though the process exits (containers keep running).
+- `Type=simple` means `ExecStart` (`exec`'d into `docker compose up`, foreground) stays alive as the unit's tracked main process, so systemd's `ActiveState` reflects real container state going forward -- no `RemainAfterExit` bookkeeping that can silently go stale.
 - `ExecStop` ensures `docker compose down` runs on service stop.
 - `BindsTo=docker.service` ties the lifecycle to the Docker daemon.
+- Systemd still can't observe containers started **outside** it (e.g. a manual `docker compose up`). `composectl sync` reconciles that drift -- see [systemd.md](systemd.md#detecting-and-fixing-drift).
 
 **Dependency overrides** are managed via systemd drop-in files:
 
