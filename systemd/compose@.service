@@ -7,8 +7,7 @@ StartLimitBurst=5
 StartLimitIntervalSec=100
 
 [Service]
-Type=oneshot
-RemainAfterExit=yes
+Type=simple
 EnvironmentFile=-/etc/compose.env
 EnvironmentFile=-%h/.config/compose.env
 EnvironmentFile=-%h/.config/docker/compose.env

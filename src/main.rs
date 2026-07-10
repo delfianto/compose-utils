@@ -7,6 +7,7 @@
 use anyhow::Result;
 use clap::{Parser, Subcommand};
 use std::path::PathBuf;
+use std::process::ExitCode;
 
 mod commands;
 mod compose;
@@ -15,7 +16,7 @@ mod display;
 mod systemd;
 
 use crate::commands::{config, deps, secret};
-use crate::core::{enable_verbose, get_context};
+use crate::core::{enable_json, enable_verbose, get_context};
 
 // ---------------------------------------------------------------------------
 // compose persona — direct Docker Compose operations
@@ -30,6 +31,10 @@ struct ComposeCli {
     #[arg(short, long, global = true)]
     verbose: bool,
 
+    /// Output results as JSON instead of human-readable text.
+    #[arg(long, global = true)]
+    json: bool,
+
     #[command(subcommand)]
     command: ComposeCommands,
 }
@@ -37,13 +42,11 @@ struct ComposeCli {
 #[derive(Subcommand)]
 enum ComposeCommands {
     /// Start containers (docker compose up -d).
-    #[command(visible_alias = "up")]
     Up {
         /// List of service names to start.
         services: Vec<String>,
     },
     /// Stop containers (docker compose down).
-    #[command(visible_alias = "down")]
     Down {
         /// List of service names to stop.
         services: Vec<String>,
@@ -82,6 +85,10 @@ struct CtlCli {
     /// Enable verbose/debug output.
     #[arg(short, long, global = true)]
     verbose: bool,
+
+    /// Output results as JSON instead of human-readable text.
+    #[arg(long, global = true)]
+    json: bool,
 
     #[command(subcommand)]
     command: CtlCommands,
@@ -123,6 +130,11 @@ enum CtlCommands {
         /// List of service names to check.
         services: Vec<String>,
     },
+    /// Reconcile systemd's tracked state against actual container state.
+    Sync {
+        /// List of service names to sync.
+        services: Vec<String>,
+    },
     /// Enable services to start on boot (systemctl enable).
     Enable {
         /// List of service names to enable.
@@ -135,11 +147,6 @@ enum CtlCommands {
     /// Disable services from starting on boot (systemctl disable).
     Disable {
         /// List of service names to disable.
-        services: Vec<String>,
-    },
-    /// List Docker containers and their statuses.
-    Ps {
-        /// List of service names to filter by (optional).
         services: Vec<String>,
     },
     /// Manage service dependencies.
@@ -161,7 +168,7 @@ enum CtlCommands {
 // Dispatch
 // ---------------------------------------------------------------------------
 
-fn main() -> Result<()> {
+fn main() -> ExitCode {
     let binary_name = std::env::args()
         .next()
         .and_then(|s| {
@@ -171,9 +178,24 @@ fn main() -> Result<()> {
         })
         .unwrap_or_else(|| "compose".to_string());
 
-    match binary_name.as_str() {
+    let result = match binary_name.as_str() {
         "composectl" => run_composectl(),
         _ => run_compose(),
+    };
+
+    match result {
+        Ok(()) => ExitCode::SUCCESS,
+        Err(e) => {
+            if core::is_json() {
+                let _ = core::print_json(&serde_json::json!({
+                    "status": "error",
+                    "error": format!("{:?}", e),
+                }));
+            } else {
+                eprintln!("Error: {:?}", e);
+            }
+            ExitCode::FAILURE
+        }
     }
 }
 
@@ -181,6 +203,9 @@ fn run_compose() -> Result<()> {
     let cli = ComposeCli::parse();
     if cli.verbose {
         enable_verbose();
+    }
+    if cli.json {
+        enable_json();
     }
     let ctx = get_context()?;
 
@@ -200,6 +225,9 @@ fn run_composectl() -> Result<()> {
     if cli.verbose {
         enable_verbose();
     }
+    if cli.json {
+        enable_json();
+    }
     let ctx = get_context()?;
 
     match cli.command {
@@ -209,9 +237,9 @@ fn run_composectl() -> Result<()> {
         CtlCommands::Update { services } => commands::run_update(&ctx, &services),
         CtlCommands::Pull { services } => commands::run_pull(&ctx, &services),
         CtlCommands::Status { services } => commands::run_status(&ctx, &services),
+        CtlCommands::Sync { services } => commands::run_sync(&ctx, &services),
         CtlCommands::Enable { services, deps } => commands::run_enable(&ctx, &services, deps),
         CtlCommands::Disable { services } => commands::run_disable(&ctx, &services),
-        CtlCommands::Ps { services } => commands::ps::run_ps(&ctx, &services),
         CtlCommands::Deps(args) => deps::run(&ctx, args),
         CtlCommands::Secret(args) => secret::run(&ctx, args),
         CtlCommands::Config(args) => config::run(&ctx, *args),

@@ -1,10 +1,10 @@
 //! Logic for the `ps` command.
 
-use crate::core::Context;
+use crate::core::{Report, Context};
 use crate::display::status::format_status;
 use crate::display::table::Table;
 use anyhow::{Context as _, Result};
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use std::process::Command;
 
 #[derive(Debug, Deserialize)]
@@ -15,6 +15,17 @@ struct DockerContainer {
     image: String,
     names: String,
     ports: String,
+    state: String,
+    status: String,
+}
+
+/// JSON-friendly container result (snake_case fields, ports split into a list).
+#[derive(Serialize)]
+struct ContainerResult {
+    id: String,
+    image: String,
+    name: String,
+    ports: Vec<String>,
     state: String,
     status: String,
 }
@@ -44,6 +55,26 @@ pub fn run_ps(_ctx: &Context, _services: &[String]) -> Result<()> {
         let container: DockerContainer =
             serde_json::from_str(line).context("Failed to parse docker ps output")?;
         containers.push(container);
+    }
+
+    if crate::core::is_json() {
+        let results: Vec<ContainerResult> = containers
+            .into_iter()
+            .map(|c| ContainerResult {
+                id: c.id,
+                image: c.image,
+                name: c.names,
+                ports: if c.ports.is_empty() {
+                    Vec::new()
+                } else {
+                    c.ports.split(", ").map(|s| s.to_string()).collect()
+                },
+                state: c.state,
+                status: c.status,
+            })
+            .collect();
+        crate::core::print_json(&Report { command: "ps", results })?;
+        return Ok(());
     }
 
     if containers.is_empty() {

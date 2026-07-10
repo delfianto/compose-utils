@@ -13,7 +13,7 @@ pub fn run_service(ctx: &Context, name: &str) -> Result<()> {
         verbose!("Infisical configured but not available, using plain docker compose");
     }
 
-    let mut cmd = build_compose_command(ctx, name, &["up", "-d"], infisical_available);
+    let mut cmd = build_compose_command(ctx, name, &["up"], infisical_available);
     let err = cmd.exec();
     Err(anyhow::anyhow!("Failed to exec compose command: {}", err))
 }

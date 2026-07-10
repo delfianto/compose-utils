@@ -13,12 +13,12 @@ compose-utils/
 +-- Justfile                    # Task runner recipes
 |
 +-- docs/                       # Technical documentation
-|   +-- ARCHITECTURE.md         # System design, data flow, patterns
-|   +-- STRUCTURE.md            # This file -- project layout
-|   +-- DEPENDENCIES.md         # External crates and rationale
-|   +-- COMMANDS.md             # Command reference for both personas
-|   +-- CONFIGURATION.md        # Config file format, paths, validation
-|   +-- SYSTEMD.md              # Systemd integration details
+|   +-- architecture.md         # System design, data flow, patterns
+|   +-- structure.md            # This file -- project layout
+|   +-- dependencies.md         # External crates and rationale
+|   +-- commands.md             # Command reference for both personas
+|   +-- configuration.md        # Config file format, paths, validation
+|   +-- systemd.md              # Systemd integration details
 |
 +-- src/                        # Rust source code
 |   +-- main.rs                 # Entry point, CLI definitions, dispatch
@@ -39,6 +39,7 @@ compose-utils/
 |   |   +-- context.rs          # Context struct, env parsing, mode detection
 |   |   +-- validation.rs       # Input validators (domain, email, URL, path)
 |   |   +-- verbose.rs          # Global debug flag and macro
+|   |   +-- output.rs           # Global JSON-mode flag, Report<T> envelope
 |   |
 |   +-- systemd.rs              # Systemd module aggregation
 |   +-- systemd/
@@ -75,7 +76,7 @@ Each file implements one or more CLI subcommands. All command functions take `&C
 |------|---------|---------|
 | `compose_direct.rs` | compose | `docker compose up/down` directly |
 | `service.rs` | composectl | `systemctl start/stop/restart/enable/disable/status` |
-| `ps.rs` | both | `docker ps` with formatted table output |
+| `ps.rs` | compose | `docker ps` with formatted table output |
 | `pull.rs` | both | `docker compose pull` per project |
 | `update.rs` | composectl | Pull images then `systemctl restart` |
 | `config.rs` | both | Read/write `compose.env` with validation |
@@ -92,6 +93,7 @@ Infrastructure shared by all commands.
 | `context.rs` | `Context` struct, `get_context()` initialization, `read_env_file()` parser |
 | `validation.rs` | `validate_directory`, `validate_domain`, `validate_email`, `validate_acme_server`, `validate_docker_host` |
 | `verbose.rs` | `enable()`, `is_enabled()`, `verbose!` macro for debug output to stderr |
+| `output.rs` | Global JSON-mode flag, `Report<T>` result envelope, `print_json()` |
 
 ### `src/systemd/`
 

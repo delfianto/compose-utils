@@ -14,8 +14,7 @@ StartLimitBurst=5
 StartLimitIntervalSec=100
 
 [Service]
-Type=oneshot
-RemainAfterExit=yes
+Type=simple
 EnvironmentFile=-/etc/compose.env
 EnvironmentFile=-%h/.config/compose.env
 EnvironmentFile=-%h/.config/docker/compose.env
@@ -33,9 +32,11 @@ WantedBy=default.target
 
 1. **`%i` substitution** -- systemd replaces `%i` with the instance name. For `compose@myapp.service`, `%i` is `myapp`.
 
-2. **`Type=oneshot` + `RemainAfterExit=yes`** -- `composectl run-service` calls `exec()` to replace itself with `docker compose up -d`. Once the containers are started, the process exits. `RemainAfterExit=yes` keeps the unit in "active" state even though no process is running (the containers are managed by Docker).
+2. **`Type=simple`** -- `composectl run-service` calls `exec()` to replace itself with `docker compose up` (foreground, no `-d`). The `docker compose` process stays alive as the unit's supervised main process, attached to the containers' lifecycle. If the containers die for any reason, `docker compose up` notices and exits, and systemd sees the real process exit and updates `ActiveState` immediately -- no stale bookkeeping like the old `Type=oneshot` + `RemainAfterExit=yes` setup, which only tracked whether `ExecStart` had last been run, not whether anything was actually still up.
 
-3. **`ExecStop`** -- When the unit is stopped, systemd runs `composectl stop-service %i`, which calls `docker compose down --remove-orphans`.
+   This only closes the "systemd thinks it's up but it's actually down" gap automatically. If containers are started completely outside systemd (e.g. a manual `docker compose up` in the project directory), systemd never spawned that process and has no way to observe it -- see [Detecting and Fixing Drift](#detecting-and-fixing-drift) below.
+
+3. **`ExecStop`** -- When the unit is stopped, systemd runs `composectl stop-service %i` (which calls `docker compose down --remove-orphans`) while the main process is still attached; the containers going away causes the main `docker compose up` process to exit on its own shortly after.
 
 4. **`BindsTo=docker.service`** -- If the Docker daemon stops, all compose services are automatically stopped too.
 
@@ -177,7 +178,7 @@ composectl start myapp
 # Systemd runs:
 #   composectl run-service myapp
 #     -> cd /home/user/compose-projects/myapp
-#     -> exec docker compose up -d
+#     -> exec docker compose up   (foreground, tracked as the unit's main process)
 
 # 3. Check status
 composectl status myapp
@@ -199,8 +200,33 @@ composectl stop myapp
 
 The hidden `run-service` and `stop-service` subcommands are called by the systemd unit, not by users directly:
 
-- **`composectl run-service <name>`** -- Resolves the project directory and calls `exec("docker", ["compose", "up", "-d"])`. The `exec()` replaces the process, so systemd tracks the docker compose process directly.
+- **`composectl run-service <name>`** -- Resolves the project directory and calls `exec("docker", ["compose", "up"])` (foreground). The `exec()` replaces the process, so systemd tracks the docker compose process directly as the unit's main PID.
 
 - **`composectl stop-service <name>`** -- Resolves the project directory and calls `exec("docker", ["compose", "down", "--remove-orphans"])`.
 
-These use Unix `exec()` (process replacement) rather than spawning a child process, which gives systemd accurate process tracking for the oneshot unit type.
+These use Unix `exec()` (process replacement) rather than spawning a child process, which gives systemd accurate, direct process tracking for `Type=simple`.
+
+## Detecting and Fixing Drift
+
+Systemd only knows about processes it spawned. If a compose project is started or stopped **outside** systemd -- e.g. running `compose up`/`compose down` (the direct persona) or a bare `docker compose` command in the project directory -- systemd's `ActiveState` can drift out of sync with what's actually running:
+
+| Systemd believes | Containers actually are | Effect on `composectl start`/`stop` |
+|---|---|---|
+| inactive | running | `composectl stop` no-ops -- systemd has nothing to stop |
+| active | gone | `composectl start` no-ops -- systemd already thinks it's up |
+
+`Type=simple` fixes the second case automatically going forward (systemd notices the moment its supervised process dies), but it can't fix the first case -- there's no unit configuration that makes systemd aware of a process it never spawned.
+
+`composectl sync [services...]` detects and corrects both directions:
+
+```bash
+composectl sync myapp
+```
+
+For each service, it compares `ActiveState` (via `systemctl show`) against the real container state (`docker compose ps --status running` in the project directory):
+
+- **Systemd down, containers up** -- runs `systemctl start`. Since `docker compose up` is idempotent, this doesn't recreate the containers -- it attaches to the already-running ones and adopts them under systemd's supervision.
+- **Systemd up, containers down** -- runs `systemctl stop` to clear the stale `active` state.
+- **In sync** -- no action, just reports the current state.
+
+Run it after any manual `docker compose`/`compose` invocation on a project that's also managed by systemd, or periodically if the two are mixed regularly.

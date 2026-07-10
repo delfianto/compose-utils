@@ -1,10 +1,18 @@
 //! Direct Docker Compose operations (no systemd indirection).
 
-use crate::core::{should_use_infisical, Context};
+use crate::core::{Report, should_use_infisical, Context};
 use crate::systemd::discovery::resolve_services;
 use crate::systemd::service::{get_bare_name, get_compose_dir};
 use anyhow::{Context as _, Result};
+use serde::Serialize;
 use std::process::Command;
+
+/// Per-service result for `compose up`/`down`/`restart`.
+#[derive(Serialize)]
+struct ComposeResult {
+    service: String,
+    status: String,
+}
 
 /// Builds a docker compose command, optionally wrapped with `infisical run`
 /// for non-bootstrap services when Infisical is configured.
@@ -114,40 +122,118 @@ fn run_compose_command(
     Ok(())
 }
 
-/// Run `docker compose up -d` directly in the project directory.
-pub fn compose_up(ctx: &Context, names: &[String]) -> Result<()> {
+/// Runs a compose lifecycle action (up/down) across the resolved services,
+/// printing human progress lines or collecting JSON results depending on mode.
+fn run_lifecycle(
+    ctx: &Context,
+    names: &[String],
+    compose_args: &[&str],
+    verb_ing: &str,
+    verb_ed: &str,
+    status_word: &str,
+) -> Result<Vec<ComposeResult>> {
     let services = resolve_services(ctx, names)?;
     let infisical_available = should_use_infisical(ctx);
+    let json = crate::core::is_json();
+
+    let mut results = Vec::new();
 
     for name in services {
         let bare = get_bare_name(&name);
-        println!("Starting {}...", bare);
-        run_compose_command(ctx, bare, &["up", "-d"], infisical_available)?;
-        println!("Started {}", bare);
+        if !json {
+            println!("{} {}...", verb_ing, bare);
+        }
+        run_compose_command(ctx, bare, compose_args, infisical_available)?;
+        if json {
+            results.push(ComposeResult {
+                service: bare.to_string(),
+                status: status_word.to_string(),
+            });
+        } else {
+            println!("{} {}", verb_ed, bare);
+        }
     }
 
+    Ok(results)
+}
+
+/// Run `docker compose up -d` directly in the project directory.
+pub fn compose_up(ctx: &Context, names: &[String]) -> Result<()> {
+    let results = run_lifecycle(ctx, names, &["up", "-d"], "Starting", "Started", "started")?;
+    if crate::core::is_json() {
+        crate::core::print_json(&Report { command: "up", results })?;
+    }
     Ok(())
 }
 
 /// Run `docker compose down --remove-orphans` directly in the project directory.
 pub fn compose_down(ctx: &Context, names: &[String]) -> Result<()> {
-    let services = resolve_services(ctx, names)?;
-    let infisical_available = should_use_infisical(ctx);
-
-    for name in services {
-        let bare = get_bare_name(&name);
-        println!("Stopping {}...", bare);
-        run_compose_command(ctx, bare, &["down", "--remove-orphans"], infisical_available)?;
-        println!("Stopped {}", bare);
+    let results = run_lifecycle(
+        ctx,
+        names,
+        &["down", "--remove-orphans"],
+        "Stopping",
+        "Stopped",
+        "stopped",
+    )?;
+    if crate::core::is_json() {
+        crate::core::print_json(&Report { command: "down", results })?;
     }
-
     Ok(())
 }
 
 /// Run `docker compose down` then `docker compose up -d`.
 pub fn compose_restart(ctx: &Context, names: &[String]) -> Result<()> {
-    compose_down(ctx, names)?;
-    compose_up(ctx, names)
+    run_lifecycle(
+        ctx,
+        names,
+        &["down", "--remove-orphans"],
+        "Stopping",
+        "Stopped",
+        "stopped",
+    )?;
+    let results = run_lifecycle(ctx, names, &["up", "-d"], "Starting", "Started", "started")?;
+
+    if crate::core::is_json() {
+        let results: Vec<ComposeResult> = results
+            .into_iter()
+            .map(|r| ComposeResult {
+                service: r.service,
+                status: "restarted".to_string(),
+            })
+            .collect();
+        crate::core::print_json(&Report { command: "restart", results })?;
+    }
+
+    Ok(())
+}
+
+/// Returns true if the compose project has at least one running container.
+///
+/// Used to detect drift between systemd's tracked unit state and the actual
+/// state of the containers (e.g. after a manual `docker compose up`/`down`
+/// that bypassed systemd entirely).
+pub(crate) fn project_is_running(ctx: &Context, bare: &str) -> Result<bool> {
+    let dir = get_compose_dir(ctx, bare);
+
+    let mut cmd = Command::new("docker");
+    cmd.args(["compose", "ps", "--status", "running", "--quiet"]);
+    cmd.current_dir(&dir);
+
+    if let Some(ref host) = ctx.docker_host {
+        cmd.env("DOCKER_HOST", host);
+    }
+
+    let output = cmd
+        .output()
+        .with_context(|| format!("Failed to check running state for {}", bare))?;
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        anyhow::bail!("docker compose ps failed for {}: {}", bare, stderr.trim());
+    }
+
+    Ok(!output.stdout.iter().all(u8::is_ascii_whitespace))
 }
 
 #[cfg(test)]

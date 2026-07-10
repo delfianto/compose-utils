@@ -110,12 +110,12 @@ Detailed technical documentation is in the [`docs/`](docs/) directory:
 
 | Document | Description |
 | :------- | :---------- |
-| [Architecture](docs/ARCHITECTURE.md) | System design, multi-call binary pattern, data flow, module graph |
-| [Project Structure](docs/STRUCTURE.md) | Directory layout, module descriptions, test distribution |
-| [Dependencies](docs/DEPENDENCIES.md) | External crates, rationale, what was removed and why |
-| [Command Reference](docs/COMMANDS.md) | Full command reference for both `compose` and `composectl` |
-| [Configuration](docs/CONFIGURATION.md) | Config file format, all keys, validation rules, management |
-| [Systemd Integration](docs/SYSTEMD.md) | Unit template, dependency overrides, root vs rootless, lifecycle |
+| [Architecture](docs/architecture.md) | System design, multi-call binary pattern, data flow, module graph |
+| [Project Structure](docs/structure.md) | Directory layout, module descriptions, test distribution |
+| [Dependencies](docs/dependencies.md) | External crates, rationale, what was removed and why |
+| [Command Reference](docs/commands.md) | Full command reference for both `compose` and `composectl` |
+| [Configuration](docs/configuration.md) | Config file format, all keys, validation rules, management |
+| [Systemd Integration](docs/systemd.md) | Unit template, dependency overrides, root vs rootless, lifecycle |
 
 ## Development
 

@@ -3,6 +3,7 @@
 use crate::core::Context;
 use crate::verbose;
 use anyhow::{Result, bail};
+use std::collections::HashMap;
 use std::process::Command;
 
 /// Lists dependencies for a given unit or the default target.
@@ -24,6 +25,40 @@ pub fn list_dependencies(ctx: &Context, unit: Option<&str>) -> Result<()> {
     }
 
     Ok(())
+}
+
+/// Returns the units that declare a reverse dependency on `unit` -- i.e. the
+/// same edges `systemctl list-dependencies --reverse` would draw (following
+/// `RequiredBy=`, `WantedBy=`, `UpheldBy=`, `PartOf=`, `BoundBy=`), but
+/// fetched via `systemctl show --property=... --value` rather than parsed
+/// out of the tree/bullet rendering meant for human eyes. Per `man
+/// systemctl`, `show` "is intended to be used whenever computer-parsable
+/// output is required" -- there is no `--output=json` for dependency
+/// listings, so this is the documented machine-readable path.
+pub fn get_reverse_dependents(ctx: &Context, unit: &str) -> Result<Vec<String>> {
+    verbose!("Getting reverse dependents for unit: {}", unit);
+    let mut cmd = systemctl_cmd(ctx);
+    cmd.arg("show")
+        .arg(unit)
+        .arg("--property=RequiredBy,WantedBy,UpheldBy,PartOf,BoundBy")
+        .arg("--value");
+
+    let output = cmd.output()?;
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        bail!("Failed to get reverse dependents for {}: {}", unit, stderr.trim());
+    }
+
+    let mut seen = std::collections::HashSet::new();
+    let mut dependents = Vec::new();
+    for name in String::from_utf8_lossy(&output.stdout).split_whitespace() {
+        if seen.insert(name.to_string()) {
+            dependents.push(name.to_string());
+        }
+    }
+
+    Ok(dependents)
 }
 
 /// Shows the status of a specific unit.
@@ -79,6 +114,33 @@ pub fn get_unit_state(ctx: &Context, unit: &str) -> Result<String> {
     }
 
     Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
+}
+
+/// Returns a curated set of unit properties (for structured/JSON status
+/// reporting), fetched via `systemctl show` rather than the interactive
+/// `systemctl status`, which can't be reliably parsed.
+pub fn get_unit_properties(ctx: &Context, unit: &str) -> Result<HashMap<String, String>> {
+    verbose!("Getting properties for unit: {}", unit);
+    let mut cmd = systemctl_cmd(ctx);
+    let output = cmd
+        .arg("show")
+        .arg("--property=ActiveState,SubState,LoadState,UnitFileState,Description")
+        .arg(unit)
+        .output()?;
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        bail!("Failed to get properties for {}: {}", unit, stderr.trim());
+    }
+
+    let mut props = HashMap::new();
+    for line in String::from_utf8_lossy(&output.stdout).lines() {
+        if let Some((key, value)) = line.split_once('=') {
+            props.insert(key.to_string(), value.to_string());
+        }
+    }
+
+    Ok(props)
 }
 
 /// Starts a systemd unit.

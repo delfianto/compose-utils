@@ -37,8 +37,8 @@ The binary has **zero library runtime dependencies** -- everything is statically
 
 | Crate | Version | Purpose | Used in |
 |-------|---------|---------|---------|
-| **serde** | 1.0 | Serialization framework. Feature: `derive`. Used for `DockerContainer` and dependency config structs. | `ps.rs`, `dependencies.rs` |
-| **serde_json** | 1.0 | JSON deserialization of `docker ps --format '{{json .}}'` output. | `ps.rs` |
+| **serde** | 1.0 | Serialization framework. Feature: `derive`. Used to deserialize `DockerContainer`/dependency config structs, and to serialize every command's `--json` output. | Most of `commands/`, `dependencies.rs` |
+| **serde_json** | 1.0 | JSON deserialization of `docker ps --format '{{json .}}'` output, and serialization of `--json` result envelopes (`core::output::Report`). | Most of `commands/`, `core/output.rs` |
 | **toml** | 1.1 | TOML deserialization for dependency configuration files. | `dependencies.rs` |
 
 ### Validation & Text
