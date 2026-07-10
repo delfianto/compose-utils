@@ -12,7 +12,6 @@ use std::process::ExitCode;
 mod commands;
 mod compose;
 mod core;
-mod display;
 mod systemd;
 
 use crate::commands::{config, deps, secret};

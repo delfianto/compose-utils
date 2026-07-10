@@ -53,15 +53,24 @@ compose pull [services...]
 
 ### compose ps
 
-List all Docker containers with formatted status.
+List all Docker containers, mirroring the `docker pps` CLI plugin's brief
+format (`~/.config/docker/cli-plugins/docker-pps`) rather than docker's own
+verbose `docker ps` output.
 
 ```
 compose ps [services...]
 ```
 
-- Runs `docker ps -a --format '{{json .}}'`
-- Renders ASCII table with columns: ID, IMAGE/TAG, NAME, PORTS, STATUS
-- Status includes emoji for state and colored dot for health
+- Runs `docker ps --all --format '{{json .}}'`, then batch-`docker inspect`s
+  every container for its real state, health, and start/finish timestamps
+- Renders a table with columns: NAMES, ID, IMAGE, STATUS, PORTS (sorted by name)
+- STATUS is a colored bullet + elapsed time (`● 1d 09:45` running/starting/
+  paused; `○ 1d 09:45` since exit; `○ --:--` created), colored green
+  (healthy/no healthcheck), yellow (starting/paused/restarting), or red
+  (unhealthy/exited/dead)
+- Multiple port mappings for one container print on additional indented lines
+- `--json` drops the colors/bullet and returns plain fields per container
+  (`name`, `id`, `image`, `state`, `health`, `uptime`, `ports`) instead
 
 ### compose config
 

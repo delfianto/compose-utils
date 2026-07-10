@@ -26,7 +26,7 @@ compose-utils/
 |   +-- commands/
 |   |   +-- compose_direct.rs   # Direct docker compose operations
 |   |   +-- service.rs          # Systemd service lifecycle
-|   |   +-- ps.rs               # Container listing
+|   |   +-- ps.rs               # Container listing (mirrors the docker-pps CLI plugin)
 |   |   +-- pull.rs             # Image pulling
 |   |   +-- update.rs           # Pull + restart
 |   |   +-- config.rs           # Configuration management
@@ -47,14 +47,7 @@ compose-utils/
 |   |   +-- service.rs          # Unit name normalization, path resolution
 |   |   +-- discovery.rs        # CWD-based project auto-detection
 |   |
-|   +-- compose.rs              # Compose module aggregation
-|   +-- compose/
-|   |   +-- dependencies.rs     # TOML dependency config parser
-|   |
-|   +-- display.rs              # Display module aggregation
-|   +-- display/
-|       +-- status.rs           # Container state emojis, health dots
-|       +-- table.rs            # ASCII table renderer
+|   +-- compose.rs              # TOML dependency config parser
 |
 +-- systemd/                    # Systemd integration files
     +-- compose@.service        # Parameterized unit template
@@ -76,7 +69,7 @@ Each file implements one or more CLI subcommands. All command functions take `&C
 |------|---------|---------|
 | `compose_direct.rs` | compose | `docker compose up/down` directly |
 | `service.rs` | composectl | `systemctl start/stop/restart/enable/disable/status` |
-| `ps.rs` | compose | `docker ps` with formatted table output |
+| `ps.rs` | compose | Container listing, mirroring the `docker pps` CLI plugin's brief format |
 | `pull.rs` | both | `docker compose pull` per project |
 | `update.rs` | composectl | Pull images then `systemctl restart` |
 | `config.rs` | both | Read/write `compose.env` with validation |
@@ -105,22 +98,9 @@ Systemd-specific logic.
 | `service.rs` | Service name normalization (`myapp` to `compose@myapp.service`), directory path resolution (dash-to-slash conversion), bare name extraction. |
 | `discovery.rs` | Auto-detects service from CWD by checking if current directory is under `compose_base` and contains a compose file. |
 
-### `src/compose/`
+### `src/compose.rs`
 
-Docker Compose-specific utilities.
-
-| File | Purpose |
-|------|---------|
-| `dependencies.rs` | Parses TOML dependency configuration into `DependenciesConfig` / `ServiceConfig` structs. |
-
-### `src/display/`
-
-Terminal output formatting.
-
-| File | Purpose |
-|------|---------|
-| `status.rs` | Maps container states to emojis, health statuses to colored dots, and combines them into formatted status strings. |
-| `table.rs` | Renders ASCII tables with column auto-sizing, multiline cell support, and ANSI color code awareness. |
+Parses TOML dependency configuration into `DependenciesConfig` / `ServiceConfig` structs.
 
 ### `systemd/`
 
@@ -138,15 +118,16 @@ Tests are colocated with their source files via `#[cfg(test)] mod tests`.
 
 | File | Tests |
 |------|-------|
-| `commands/config.rs` | 26 |
-| `commands/deps.rs` | 16 |
-| `commands/ps.rs` | 8 |
-| `compose/dependencies.rs` | 11 |
-| `core/context.rs` | 15 |
-| `core/validation.rs` | 48 |
+| `commands/compose_direct.rs` | 9 |
+| `commands/config.rs` | 44 |
+| `commands/deps.rs` | 25 |
+| `commands/ps.rs` | 38 |
+| `commands/secret.rs` | 13 |
+| `compose.rs` | 11 |
+| `core/context.rs` | 34 |
+| `core/output.rs` | 2 |
+| `core/validation.rs` | 61 |
 | `core/verbose.rs` | 3 |
-| `display/status.rs` | 23 |
-| `display/table.rs` | 14 |
 | `systemd/discovery.rs` | 10 |
 | `systemd/service.rs` | 32 |
-| **Total** | **206** |
+| **Total** | **282** |

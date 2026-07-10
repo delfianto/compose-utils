@@ -35,7 +35,7 @@ main.rs
  +-- commands/
  |    +-- compose_direct.rs   (compose: up, down, restart)
  |    +-- service.rs          (composectl: start, stop, restart, status, enable, disable)
- |    +-- ps.rs               (compose: container listing)
+ |    +-- ps.rs               (compose: container listing, mirrors the docker-pps CLI plugin)
  |    +-- pull.rs             (shared: image pulling)
  |    +-- update.rs           (composectl: pull + systemd restart)
  |    +-- config.rs           (shared: configuration management)
@@ -54,12 +54,7 @@ main.rs
  |    +-- service.rs          (unit name normalization, path resolution)
  |    +-- discovery.rs        (CWD-based project auto-detection)
  |
- +-- compose/
- |    +-- dependencies.rs     (TOML dependency config parsing)
- |
- +-- display/
-      +-- status.rs           (container state emojis, health dots)
-      +-- table.rs            (ASCII table renderer with ANSI support)
+ +-- compose.rs               (TOML dependency config parsing)
 ```
 
 **Key coupling points:**
@@ -226,12 +221,12 @@ Failed to start compose@myapp.service: Unit not found.
 
 ## Testing Strategy
 
-The test suite (206 tests) focuses on **pure functions and file-based operations** that can be tested without external services:
+The test suite (282 tests) focuses on **pure functions and file-based operations** that can be tested without external services:
 
 - **Unit name normalization** -- all input variants and idempotency
 - **File parsing** -- env files, TOML configs, systemd override files
 - **Validation** -- domain, email, URL, path validators with edge cases
-- **Display** -- table rendering, ANSI handling, status formatting
-- **JSON deserialization** -- docker ps output parsing
+- **Container listing** -- port-line parsing/sorting/dedup, RFC3339 timestamp math, status/uptime formatting
+- **JSON deserialization** -- docker ps/inspect output parsing
 
 Commands that shell out to `docker` or `systemctl` are not unit tested -- they require integration test infrastructure with real Docker and systemd.
