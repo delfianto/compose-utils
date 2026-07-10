@@ -2,6 +2,7 @@ use crate::commands::pull::pull_images;
 use crate::core::{Report, Context};
 use crate::systemd::discovery::resolve_services;
 use crate::systemd::manager::restart_unit;
+use crate::systemd::service::{get_bare_name, normalize_unit_name};
 use anyhow::Result;
 use serde::Serialize;
 
@@ -24,7 +25,10 @@ pub fn run_update(ctx: &Context, services: &[String]) -> Result<()> {
             .into_iter()
             .next()
             .expect("pull_images returns exactly one result per requested service");
-        restart_unit(ctx, &service)?;
+
+        let bare = get_bare_name(&service);
+        let unit_name = normalize_unit_name(ctx, bare);
+        restart_unit(ctx, &unit_name)?;
 
         if json {
             results.push(UpdateResult {
