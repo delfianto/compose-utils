@@ -3,7 +3,7 @@
 use crate::core::Context;
 use anyhow::Result;
 use clap::{Args, Subcommand};
-use std::collections::HashMap;
+use std::collections::BTreeMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 
@@ -113,10 +113,13 @@ fn list_all_deps(ctx: &Context) -> Result<()> {
 struct ServiceEntry {
     state: String,
     /// Units this service requires/binds to (`Requires=` + `BindsTo=`) --
-    /// if any of these stop, this service stops too.
+    /// if any of these stop, this service stops too. Omitted when empty --
+    /// an empty list on every leaf service is noise, not information.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
     required: Vec<String>,
     /// Units this service merely wants (`Wants=`) -- started alongside it,
-    /// but not required to keep it running.
+    /// but not required to keep it running. Omitted when empty.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
     wanted: Vec<String>,
 }
 
@@ -207,11 +210,11 @@ fn get_override_file(ctx: &Context, service: &str) -> PathBuf {
 }
 
 /// Internal type for storing parsed systemd unit dependencies.
-type SystemdDeps = HashMap<String, Vec<String>>;
+type SystemdDeps = BTreeMap<String, Vec<String>>;
 
 /// Parses a systemd drop-in override file to extract dependency keys.
 fn parse_override_file(override_file: &Path) -> Result<SystemdDeps> {
-    let mut deps: SystemdDeps = HashMap::new();
+    let mut deps: SystemdDeps = BTreeMap::new();
     deps.insert("Requires".to_string(), Vec::new());
     deps.insert("Wants".to_string(), Vec::new());
     deps.insert("BindsTo".to_string(), Vec::new());
@@ -325,7 +328,7 @@ pub fn apply_dependencies(
     fs::create_dir_all(&override_dir)?;
 
     // Start with a clean slate to avoid stale dependencies
-    let mut current_deps: SystemdDeps = HashMap::new();
+    let mut current_deps: SystemdDeps = BTreeMap::new();
     current_deps.insert("Requires".to_string(), Vec::new());
     current_deps.insert("Wants".to_string(), Vec::new());
     current_deps.insert("BindsTo".to_string(), Vec::new());
@@ -458,15 +461,19 @@ fn list_deps(ctx: &Context, service: &str) -> Result<()> {
 
     if json {
         let entry = entry.expect("entry is always built in JSON mode");
-        crate::core::print_json(&serde_json::json!({
-            "command": "deps",
-            "action": "list",
-            "service": service_name,
-            "state": entry.state,
-            "required": entry.required,
-            "wanted": entry.wanted,
-            "overrides": overrides,
-        }))?;
+        let mut obj = serde_json::Map::new();
+        obj.insert("command".to_string(), serde_json::json!("deps"));
+        obj.insert("action".to_string(), serde_json::json!("list"));
+        obj.insert("service".to_string(), serde_json::json!(service_name));
+        obj.insert("state".to_string(), serde_json::json!(entry.state));
+        if !entry.required.is_empty() {
+            obj.insert("required".to_string(), serde_json::json!(entry.required));
+        }
+        if !entry.wanted.is_empty() {
+            obj.insert("wanted".to_string(), serde_json::json!(entry.wanted));
+        }
+        obj.insert("overrides".to_string(), serde_json::json!(overrides));
+        crate::core::print_json(&serde_json::Value::Object(obj))?;
         return Ok(());
     }
 
@@ -560,7 +567,7 @@ mod tests {
     fn test_write_override_file() {
         let dir = tempdir().unwrap();
         let file = dir.path().join("test.conf");
-        let mut deps: SystemdDeps = HashMap::new();
+        let mut deps: SystemdDeps = BTreeMap::new();
         deps.insert("Wants".to_string(), vec!["compose@db.service".to_string()]);
 
         write_override_file(&file, &deps).unwrap();
@@ -712,7 +719,7 @@ mod tests {
         let dir = tempdir().unwrap();
         let file = dir.path().join("test.conf");
 
-        let mut deps: SystemdDeps = HashMap::new();
+        let mut deps: SystemdDeps = BTreeMap::new();
         deps.insert(
             "Requires".to_string(),
             vec!["compose@db.service".to_string()],
@@ -746,7 +753,7 @@ mod tests {
     fn test_write_override_file_empty_deps() {
         let dir = tempdir().unwrap();
         let file = dir.path().join("test.conf");
-        let deps: SystemdDeps = HashMap::new();
+        let deps: SystemdDeps = BTreeMap::new();
 
         write_override_file(&file, &deps).unwrap();
         let content = fs::read_to_string(&file).unwrap();
@@ -1025,7 +1032,7 @@ mod tests {
     fn test_write_override_file_all_four_keys() {
         let dir = tempdir().unwrap();
         let file = dir.path().join("test.conf");
-        let mut deps: SystemdDeps = HashMap::new();
+        let mut deps: SystemdDeps = BTreeMap::new();
         deps.insert(
             "Requires".to_string(),
             vec!["docker.service".to_string()],
@@ -1063,7 +1070,7 @@ mod tests {
     fn test_write_override_file_only_after() {
         let dir = tempdir().unwrap();
         let file = dir.path().join("test.conf");
-        let mut deps: SystemdDeps = HashMap::new();
+        let mut deps: SystemdDeps = BTreeMap::new();
         deps.insert("Requires".to_string(), Vec::new());
         deps.insert("Wants".to_string(), Vec::new());
         deps.insert("BindsTo".to_string(), Vec::new());
