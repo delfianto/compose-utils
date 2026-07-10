@@ -92,25 +92,32 @@ fn clear_deps(ctx: &Context, service: &str) -> Result<()> {
 
 fn list_all_deps(ctx: &Context) -> Result<()> {
     if crate::core::is_json() {
-        let graph = build_dependency_graph(ctx, "docker.service")?;
+        let units = discover_compose_units(ctx)?;
+        let mut services = std::collections::BTreeMap::new();
+        for unit in units {
+            let entry = service_entry(ctx, &unit)?;
+            services.insert(unit, entry);
+        }
         crate::core::print_json(&serde_json::json!({
             "command": "deps",
             "action": "list",
-            "edges": graph.edges,
-            "states": graph.states,
+            "services": services,
         }))?;
         return Ok(());
     }
     crate::systemd::manager::list_dependencies(ctx, None)
 }
 
-/// A flat reverse-dependency graph rooted at some unit (see
-/// [`build_dependency_graph`]).
-struct DependencyGraph {
-    /// unit -> its direct reverse-dependents (units that require/want it).
-    edges: std::collections::BTreeMap<String, Vec<String>>,
-    /// unit -> its current `ActiveState`.
-    states: std::collections::BTreeMap<String, String>,
+/// A single service's forward dependencies, as reported in JSON output.
+#[derive(serde::Serialize)]
+struct ServiceEntry {
+    state: String,
+    /// Units this service requires/binds to (`Requires=` + `BindsTo=`) --
+    /// if any of these stop, this service stops too.
+    required: Vec<String>,
+    /// Units this service merely wants (`Wants=`) -- started alongside it,
+    /// but not required to keep it running.
+    wanted: Vec<String>,
 }
 
 /// Returns true if `unit` is one of this tool's own `compose@*.service` units.
@@ -118,56 +125,74 @@ fn is_compose_unit(unit: &str) -> bool {
     unit.starts_with("compose@") && unit.ends_with(".service")
 }
 
-/// Builds the reverse-dependency graph rooted at `root`, following the same
-/// edges `systemctl list-dependencies --reverse` would (`RequiredBy=`,
-/// `WantedBy=`, `UpheldBy=`, `PartOf=`, `BoundBy=`), fetched via `systemctl
-/// show` -- systemd's documented machine-parsable interface -- rather than
-/// by parsing that command's human-oriented tree/bullet rendering.
-///
-/// Two departures from a literal port of that tree:
-/// - The result is a flat `unit -> [dependents]` map, not a nested tree,
-///   since the underlying relationship is a DAG: a unit like a shared
-///   database can legitimately have more than one dependent, and forcing
-///   that into a tree means duplicating it under every parent.
-/// - Traversal only follows into `compose@*.service` units. Every unit here
-///   is also implicitly `WantedBy=default.target` (that's just what "enabled"
-///   means) and `Requires=`/`BindsTo=docker.service`, so leaving those in
-///   would add a `default.target` (and `docker.service`) leaf under nearly
-///   every node without conveying any information beyond "this is enabled".
-///   Only edges between the compose services this tool actually manages are
-///   kept.
-fn build_dependency_graph(ctx: &Context, root: &str) -> Result<DependencyGraph> {
-    let mut edges = std::collections::BTreeMap::new();
-    let mut states = std::collections::BTreeMap::new();
+/// Discovers every `compose@*.service` unit registered with systemd, by
+/// walking `RequiredBy=`/`WantedBy=`/etc. outward from `docker.service`
+/// (every compose service requires it, per [`apply_dependencies`]) and then
+/// outward again from each compose unit found, so units that are only
+/// depended on by other compose units (never directly by docker.service)
+/// are still reached.
+fn discover_compose_units(ctx: &Context) -> Result<Vec<String>> {
     let mut visited = std::collections::HashSet::new();
     let mut queue = std::collections::VecDeque::new();
+    let mut units = Vec::new();
 
-    visited.insert(root.to_string());
-    queue.push_back(root.to_string());
+    visited.insert("docker.service".to_string());
+    queue.push_back("docker.service".to_string());
 
     while let Some(unit) = queue.pop_front() {
-        let props = crate::systemd::manager::get_unit_properties(ctx, &unit)?;
-        states.insert(
-            unit.clone(),
-            props.get("ActiveState").cloned().unwrap_or_else(|| "unknown".to_string()),
-        );
-
         let mut dependents: Vec<String> = crate::systemd::manager::get_reverse_dependents(ctx, &unit)?
             .into_iter()
             .filter(|u| is_compose_unit(u))
             .collect();
         dependents.sort();
 
-        for dep in &dependents {
+        for dep in dependents {
             if visited.insert(dep.clone()) {
-                queue.push_back(dep.clone());
+                units.push(dep.clone());
+                queue.push_back(dep);
             }
         }
-
-        edges.insert(unit, dependents);
     }
 
-    Ok(DependencyGraph { edges, states })
+    units.sort();
+    Ok(units)
+}
+
+/// Builds a [`ServiceEntry`] for `unit`: its current state plus the
+/// compose units it declares as `required`/`wanted`, fetched via
+/// `systemctl show` (the forward counterpart of the reverse-dependent walk
+/// in [`discover_compose_units`]).
+///
+/// Only edges to other `compose@*.service` units are kept -- every compose
+/// service also implicitly `Requires=`/`BindsTo=docker.service` (see
+/// [`apply_dependencies`]), and listing that on every single entry would be
+/// noise rather than information.
+fn service_entry(ctx: &Context, unit: &str) -> Result<ServiceEntry> {
+    let props = crate::systemd::manager::get_unit_properties(ctx, unit)?;
+    let state = props.get("ActiveState").cloned().unwrap_or_else(|| "unknown".to_string());
+
+    let fwd = crate::systemd::manager::get_unit_dependencies(ctx, unit)?;
+    let compose_only = |key: &str| -> Vec<String> {
+        let mut items: Vec<String> = fwd
+            .get(key)
+            .into_iter()
+            .flatten()
+            .filter(|u| is_compose_unit(u))
+            .cloned()
+            .collect();
+        items.sort();
+        items.dedup();
+        items
+    };
+
+    let mut required = compose_only("Requires");
+    required.extend(compose_only("BindsTo"));
+    required.sort();
+    required.dedup();
+
+    let wanted = compose_only("Wants");
+
+    Ok(ServiceEntry { state, required, wanted })
 }
 
 /// Returns the path to the systemd drop-in override directory for a service.
@@ -413,8 +438,8 @@ fn list_deps(ctx: &Context, service: &str) -> Result<()> {
     let service_name = crate::systemd::service::normalize_unit_name(ctx, service);
     let json = crate::core::is_json();
 
-    let graph = if json {
-        Some(build_dependency_graph(ctx, &service_name)?)
+    let entry = if json {
+        Some(service_entry(ctx, &service_name)?)
     } else {
         println!("Dependency tree for {}:", service_name);
         if let Err(e) = crate::systemd::manager::list_dependencies(ctx, Some(&service_name)) {
@@ -432,13 +457,14 @@ fn list_deps(ctx: &Context, service: &str) -> Result<()> {
     };
 
     if json {
-        let graph = graph.expect("graph is always built in JSON mode");
+        let entry = entry.expect("entry is always built in JSON mode");
         crate::core::print_json(&serde_json::json!({
             "command": "deps",
             "action": "list",
             "service": service_name,
-            "edges": graph.edges,
-            "states": graph.states,
+            "state": entry.state,
+            "required": entry.required,
+            "wanted": entry.wanted,
             "overrides": overrides,
         }))?;
         return Ok(());

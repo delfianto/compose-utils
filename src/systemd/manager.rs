@@ -61,6 +61,34 @@ pub fn get_reverse_dependents(ctx: &Context, unit: &str) -> Result<Vec<String>> 
     Ok(dependents)
 }
 
+/// Returns the dependencies a unit itself declares on other units
+/// (`Requires=`, `BindsTo=`, `Wants=`), fetched via `systemctl show`. This is
+/// the forward counterpart to [`get_reverse_dependents`]: the units this
+/// unit depends on, rather than the units that depend on it.
+pub fn get_unit_dependencies(ctx: &Context, unit: &str) -> Result<HashMap<String, Vec<String>>> {
+    verbose!("Getting forward dependencies for unit: {}", unit);
+    let mut cmd = systemctl_cmd(ctx);
+    let output = cmd
+        .arg("show")
+        .arg(unit)
+        .arg("--property=Requires,BindsTo,Wants")
+        .output()?;
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        bail!("Failed to get dependencies for {}: {}", unit, stderr.trim());
+    }
+
+    let mut deps = HashMap::new();
+    for line in String::from_utf8_lossy(&output.stdout).lines() {
+        if let Some((key, val)) = line.split_once('=') {
+            deps.insert(key.to_string(), val.split_whitespace().map(String::from).collect());
+        }
+    }
+
+    Ok(deps)
+}
+
 /// Shows the status of a specific unit.
 pub fn show_status(ctx: &Context, unit: &str) -> Result<()> {
     verbose!("Showing status for unit: {}", unit);
