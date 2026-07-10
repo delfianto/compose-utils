@@ -37,7 +37,7 @@ The binary has **zero library runtime dependencies** -- everything is statically
 
 | Crate | Version | Purpose | Used in |
 |-------|---------|---------|---------|
-| **serde** | 1.0 | Serialization framework. Feature: `derive`. Used to deserialize `DockerContainer`/dependency config structs, and to serialize every command's `--json` output. | Most of `commands/`, `dependencies.rs` |
+| **serde** | 1.0 | Serialization framework. Feature: `derive`. Used to deserialize `docker ps`/dependency config structs, and to serialize every command's `--json` output. | Most of `commands/`, `dependencies.rs` |
 | **serde_json** | 1.0 | JSON deserialization of `docker ps --format '{{json .}}'` output, and serialization of `--json` result envelopes (`core::output::Report`). | Most of `commands/`, `core/output.rs` |
 | **toml** | 1.1 | TOML deserialization for dependency configuration files. | `dependencies.rs` |
 
@@ -45,15 +45,9 @@ The binary has **zero library runtime dependencies** -- everything is statically
 
 | Crate | Version | Purpose | Used in |
 |-------|---------|---------|---------|
-| **regex** | 1.12 | Regular expressions for domain/email validation and ANSI code stripping. | `validation.rs`, `table.rs` |
+| **regex** | 1.12 | Regular expressions for domain/email validation and detecting dangling image-ID references in `ps`. | `validation.rs`, `ps.rs` |
 | **url** | 2.5 | URL parsing and validation for ACME server and Docker host URIs. | `validation.rs` |
 | **shellexpand** | 3.1 | Shell variable expansion (e.g., `$HOME` in paths). | `context.rs` |
-
-### Display
-
-| Crate | Version | Purpose | Used in |
-|-------|---------|---------|---------|
-| **colored** | 3.1 | ANSI terminal colors for health dots and output formatting. | `status.rs` |
 
 ### Utilities
 
@@ -73,6 +67,7 @@ The binary has **zero library runtime dependencies** -- everything is statically
 |-------|--------|
 | **tokio** | Removed in v0.2.0. No actual async I/O existed -- all operations are blocking `Command::new().output()` calls. Removing tokio reduced binary size and compile time significantly. |
 | **once_cell** | Replaced by `std::sync::LazyLock` (stable since Rust 1.80). Only two static regex patterns were using it. |
+| **colored** | Removed when `compose ps` was rewritten to mirror the `docker pps` CLI plugin's own hand-rolled ANSI codes byte-for-byte, and the generic `display::table`/`display::status` modules it was the sole consumer of were deleted as dead code. |
 
 ## Dependency Philosophy
 
