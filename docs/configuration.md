@@ -25,12 +25,6 @@ TRAEFIK_ACME_SERVER=https://acme-v02.api.letsencrypt.org/directory
 
 # Docker
 DOCKER_HOST=unix:///run/user/1000/docker.sock
-
-# Infisical (optional)
-INFISICAL_PROJECT_ID=abc123def456
-INFISICAL_ENV=production
-INFISICAL_ADDRESS=https://infisical.example.com
-INFISICAL_BOOTSTRAP=db/postgres,db/valkey,infra/infisical
 ```
 
 ## Configuration Keys
@@ -82,35 +76,6 @@ Docker daemon endpoint. Supports three URI schemes:
 | `tcp://` | `tcp://localhost:2375` | Valid URL with host |
 | `ssh://` | `ssh://user@host:22` | Valid URL with host |
 
-### INFISICAL_PROJECT_ID
-
-Project ID in your Infisical instance. Setting this enables Infisical secret injection for non-bootstrap services. When set, `compose up` and `composectl start` will wrap `docker compose` commands with `infisical run`.
-
-- **Validation:** None (opaque string)
-- **Default:** Unset (Infisical disabled)
-
-### INFISICAL_ENV
-
-Infisical environment name for secret resolution.
-
-- **Validation:** None (freeform string)
-- **Default:** `production`
-
-### INFISICAL_ADDRESS
-
-URL of the Infisical server API.
-
-- **Validation:** Valid HTTP/HTTPS URL with a host (no DNS resolution check)
-- **Default:** Unset (uses Infisical CLI default)
-
-### INFISICAL_BOOTSTRAP
-
-Comma-separated list of bootstrap (Tier 0) services that should skip Infisical injection. These services must start before Infisical is available.
-
-- **Validation:** No empty entries, no spaces within entries
-- **Default:** Empty (no bootstrap services)
-- **Example:** `db/postgres,db/valkey,infra/infisical`
-
 ## Managing Configuration
 
 ### View current settings
@@ -147,10 +112,6 @@ All values are validated before writing. If validation fails, the config file is
 | `--acme-email <EMAIL>` | `TRAEFIK_ACME_EMAIL` | Valid email |
 | `--acme-server <URL>` | `TRAEFIK_ACME_SERVER` | Valid URL, host resolves |
 | `--docker-host <URI>` | `DOCKER_HOST` | Valid docker endpoint |
-| `--infisical-project-id <ID>` | `INFISICAL_PROJECT_ID` | None |
-| `--infisical-env <ENV>` | `INFISICAL_ENV` | None |
-| `--infisical-address <URL>` | `INFISICAL_ADDRESS` | Valid HTTP/HTTPS URL |
-| `--infisical-bootstrap <LIST>` | `INFISICAL_BOOTSTRAP` | Comma-separated, no empty entries |
 
 ## Environment File in Systemd
 

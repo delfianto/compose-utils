@@ -516,10 +516,6 @@ mod tests {
             compose_base: dir.path().join("compose"),
             env_file: dir.path().join("env"),
             docker_host: None,
-            infisical_project_id: None,
-            infisical_env: None,
-            infisical_address: None,
-            infisical_bootstrap: vec![],
         };
         fs::create_dir_all(&ctx.compose_base).unwrap();
         fs::create_dir_all(ctx.compose_base.join("myapp")).unwrap();
@@ -593,10 +589,6 @@ mod tests {
             compose_base: dir.path().join("compose"),
             env_file: dir.path().join("env"),
             docker_host: None,
-            infisical_project_id: None,
-            infisical_env: None,
-            infisical_address: None,
-            infisical_bootstrap: vec![],
         };
 
         fs::create_dir_all(&ctx.compose_base).unwrap();
@@ -637,10 +629,6 @@ mod tests {
             compose_base: dir.path().join("compose"),
             env_file: dir.path().join("env"),
             docker_host: None,
-            infisical_project_id: None,
-            infisical_env: None,
-            infisical_address: None,
-            infisical_bootstrap: vec![],
         };
         fs::create_dir_all(&ctx.compose_base).unwrap();
         fs::create_dir_all(ctx.compose_base.join("app1")).unwrap();
@@ -779,10 +767,6 @@ mod tests {
             compose_base: dir.path().join("compose"),
             env_file: dir.path().join("env"),
             docker_host: None,
-            infisical_project_id: None,
-            infisical_env: None,
-            infisical_address: None,
-            infisical_bootstrap: vec![],
         };
         fs::create_dir_all(&ctx.compose_base).unwrap();
 
@@ -812,10 +796,6 @@ mod tests {
             compose_base: dir.path().join("compose"),
             env_file: dir.path().join("env"),
             docker_host: None,
-            infisical_project_id: None,
-            infisical_env: None,
-            infisical_address: None,
-            infisical_bootstrap: vec![],
         };
         fs::create_dir_all(&ctx.compose_base).unwrap();
         fs::create_dir_all(ctx.compose_base.join("custom")).unwrap();
@@ -845,10 +825,6 @@ mod tests {
             compose_base: dir.path().join("compose"),
             env_file: dir.path().join("env"),
             docker_host: None,
-            infisical_project_id: None,
-            infisical_env: None,
-            infisical_address: None,
-            infisical_bootstrap: vec![],
         };
         fs::create_dir_all(&ctx.compose_base).unwrap();
         fs::create_dir_all(ctx.compose_base.join("myapp")).unwrap();
@@ -884,10 +860,6 @@ mod tests {
             compose_base: dir.path().join("compose"),
             env_file: dir.path().join("env"),
             docker_host: None,
-            infisical_project_id: None,
-            infisical_env: None,
-            infisical_address: None,
-            infisical_bootstrap: vec![],
         };
         fs::create_dir_all(&ctx.compose_base).unwrap();
         fs::create_dir_all(ctx.compose_base.join("db")).unwrap();
@@ -925,10 +897,6 @@ mod tests {
             compose_base: dir.path().join("compose"),
             env_file: dir.path().join("env"),
             docker_host: None,
-            infisical_project_id: None,
-            infisical_env: None,
-            infisical_address: None,
-            infisical_bootstrap: vec![],
         };
         fs::create_dir_all(&ctx.compose_base).unwrap();
 
@@ -959,10 +927,6 @@ mod tests {
             compose_base: dir.path().join("compose"),
             env_file: dir.path().join("env"),
             docker_host: None,
-            infisical_project_id: None,
-            infisical_env: None,
-            infisical_address: None,
-            infisical_bootstrap: vec![],
         };
         fs::create_dir_all(&ctx.compose_base).unwrap();
         fs::create_dir_all(ctx.compose_base.join("db")).unwrap();
@@ -1102,10 +1066,6 @@ mod tests {
             compose_base: dir.path().join("compose"),
             env_file: dir.path().join("env"),
             docker_host: None,
-            infisical_project_id: None,
-            infisical_env: None,
-            infisical_address: None,
-            infisical_bootstrap: vec![],
         };
         fs::create_dir_all(&ctx.compose_base).unwrap();
         fs::create_dir_all(ctx.compose_base.join("myapp")).unwrap();
@@ -1127,10 +1087,6 @@ mod tests {
             compose_base: dir.path().join("compose"),
             env_file: dir.path().join("env"),
             docker_host: None,
-            infisical_project_id: None,
-            infisical_env: None,
-            infisical_address: None,
-            infisical_bootstrap: vec![],
         };
         fs::create_dir_all(&ctx.compose_base).unwrap();
         fs::create_dir_all(ctx.compose_base.join("optional-svc")).unwrap();

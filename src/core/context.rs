@@ -9,7 +9,6 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use super::constants;
-use super::validation;
 
 /// Represents the runtime environment and configuration for the application.
 ///
@@ -27,79 +26,6 @@ pub struct Context {
     pub env_file: PathBuf,
     /// Optional Docker host URI (e.g., unix:///var/run/docker.sock).
     pub docker_host: Option<String>,
-    /// Optional Infisical project ID for secret injection.
-    pub infisical_project_id: Option<String>,
-    /// Optional Infisical environment name (defaults to "production").
-    pub infisical_env: Option<String>,
-    /// Optional Infisical server address.
-    pub infisical_address: Option<String>,
-    /// Bootstrap services that skip Infisical injection (Tier 0).
-    pub infisical_bootstrap: Vec<String>,
-}
-
-impl Context {
-    /// Returns true if the given bare service name is a bootstrap (Tier 0) service
-    /// that should not use Infisical secret injection.
-    ///
-    /// Normalizes both the input and the bootstrap list entries by replacing
-    /// '/' with '-', so "db/postgres" and "db-postgres" both match.
-    pub fn is_bootstrap_service(&self, bare_name: &str) -> bool {
-        let normalized = bare_name.replace('/', "-");
-        self.infisical_bootstrap
-            .iter()
-            .any(|b| b.replace('/', "-") == normalized)
-    }
-}
-
-/// Returns true if Infisical integration should be used.
-///
-/// Three conditions must all be true:
-/// 1. `INFISICAL_PROJECT_ID` is configured (feature is enabled)
-/// 2. `INFISICAL_TOKEN` env var exists (authentication is available)
-/// 3. `infisical` binary is in PATH (CLI is installed)
-pub fn should_use_infisical(ctx: &Context) -> bool {
-    ctx.infisical_project_id.is_some()
-        && env::var("INFISICAL_TOKEN").is_ok()
-        && which::which("infisical").is_ok()
-}
-
-struct InfisicalConfig {
-    project_id: Option<String>,
-    env: Option<String>,
-    address: Option<String>,
-    bootstrap: Vec<String>,
-}
-
-/// Extracts and validates Infisical configuration from a config HashMap.
-fn extract_infisical_config(config: &HashMap<String, String>) -> Result<InfisicalConfig> {
-    let project_id = config.get("INFISICAL_PROJECT_ID").cloned();
-    let env = config.get("INFISICAL_ENV").cloned();
-    let address = config.get("INFISICAL_ADDRESS").cloned();
-
-    if let Some(ref addr) = address {
-        validation::validate_url(addr)?;
-    }
-
-    let bootstrap_raw = config
-        .get("INFISICAL_BOOTSTRAP")
-        .cloned()
-        .unwrap_or_default();
-    if !bootstrap_raw.is_empty() {
-        validation::validate_bootstrap_list(&bootstrap_raw)?;
-    }
-
-    let bootstrap = bootstrap_raw
-        .split(',')
-        .map(|s| s.trim().to_string())
-        .filter(|s| !s.is_empty())
-        .collect();
-
-    Ok(InfisicalConfig {
-        project_id,
-        env,
-        address,
-        bootstrap,
-    })
 }
 
 /// Initializes and returns the application [`Context`].
@@ -141,7 +67,6 @@ pub fn get_context() -> Result<Context> {
             .unwrap_or_else(|| PathBuf::from(constants::ROOT_COMPOSE_BASE));
 
         let docker_host = config.get("DOCKER_HOST").cloned();
-        let infisical = extract_infisical_config(&config)?;
 
         let ctx = Context {
             is_root: true,
@@ -149,10 +74,6 @@ pub fn get_context() -> Result<Context> {
             compose_base,
             env_file,
             docker_host,
-            infisical_project_id: infisical.project_id,
-            infisical_env: infisical.env,
-            infisical_address: infisical.address,
-            infisical_bootstrap: infisical.bootstrap,
         };
 
         verbose!("Systemd dir: {}", ctx.systemd_dir.display());
@@ -160,18 +81,6 @@ pub fn get_context() -> Result<Context> {
         verbose!("Env file: {}", ctx.env_file.display());
         if let Some(ref host) = ctx.docker_host {
             verbose!("Docker host: {}", host);
-        }
-        if let Some(ref pid) = ctx.infisical_project_id {
-            verbose!("Infisical project: {}", pid);
-        }
-        if let Some(ref ienv) = ctx.infisical_env {
-            verbose!("Infisical env: {}", ienv);
-        }
-        if let Some(ref addr) = ctx.infisical_address {
-            verbose!("Infisical address: {}", addr);
-        }
-        if !ctx.infisical_bootstrap.is_empty() {
-            verbose!("Infisical bootstrap: {:?}", ctx.infisical_bootstrap);
         }
 
         return Ok(ctx);
@@ -201,7 +110,6 @@ pub fn get_context() -> Result<Context> {
         .unwrap_or_else(|| base_dirs.home_dir().join(constants::USER_COMPOSE_BASE_NAME));
 
     let docker_host = config.get("DOCKER_HOST").cloned();
-    let infisical = extract_infisical_config(&config)?;
 
     let ctx = Context {
         is_root: false,
@@ -209,10 +117,6 @@ pub fn get_context() -> Result<Context> {
         compose_base,
         env_file,
         docker_host,
-        infisical_project_id: infisical.project_id,
-        infisical_env: infisical.env,
-        infisical_address: infisical.address,
-        infisical_bootstrap: infisical.bootstrap,
     };
 
     verbose!("Systemd dir: {}", ctx.systemd_dir.display());
@@ -220,18 +124,6 @@ pub fn get_context() -> Result<Context> {
     verbose!("Env file: {}", ctx.env_file.display());
     if let Some(ref host) = ctx.docker_host {
         verbose!("Docker host: {}", host);
-    }
-    if let Some(ref pid) = ctx.infisical_project_id {
-        verbose!("Infisical project: {}", pid);
-    }
-    if let Some(ref ienv) = ctx.infisical_env {
-        verbose!("Infisical env: {}", ienv);
-    }
-    if let Some(ref addr) = ctx.infisical_address {
-        verbose!("Infisical address: {}", addr);
-    }
-    if !ctx.infisical_bootstrap.is_empty() {
-        verbose!("Infisical bootstrap: {:?}", ctx.infisical_bootstrap);
     }
 
     Ok(ctx)
@@ -670,191 +562,5 @@ mod tests {
 
         let result = detect_and_validate_mode(false, &env_vars, &root_socket).unwrap();
         assert_eq!(result, user_socket);
-    }
-
-    // --- is_bootstrap_service tests ---
-
-    fn ctx_with_bootstrap() -> Context {
-        Context {
-            is_root: false,
-            systemd_dir: PathBuf::from("/tmp"),
-            compose_base: PathBuf::from("/tmp"),
-            env_file: PathBuf::from("/tmp/compose.env"),
-            docker_host: None,
-            infisical_project_id: None,
-            infisical_env: None,
-            infisical_address: None,
-            infisical_bootstrap: vec![
-                "db/postgres".to_string(),
-                "db/valkey".to_string(),
-                "infra/infisical".to_string(),
-            ],
-        }
-    }
-
-    #[test]
-    fn test_is_bootstrap_service_dash_input() {
-        let ctx = ctx_with_bootstrap();
-        assert!(ctx.is_bootstrap_service("db-postgres"));
-        assert!(ctx.is_bootstrap_service("db-valkey"));
-        assert!(ctx.is_bootstrap_service("infra-infisical"));
-    }
-
-    #[test]
-    fn test_is_bootstrap_service_slash_input() {
-        let ctx = ctx_with_bootstrap();
-        assert!(ctx.is_bootstrap_service("db/postgres"));
-        assert!(ctx.is_bootstrap_service("db/valkey"));
-        assert!(ctx.is_bootstrap_service("infra/infisical"));
-    }
-
-    #[test]
-    fn test_is_bootstrap_service_not_in_list() {
-        let ctx = ctx_with_bootstrap();
-        assert!(!ctx.is_bootstrap_service("db-mariadb"));
-        assert!(!ctx.is_bootstrap_service("ai-ollama"));
-        assert!(!ctx.is_bootstrap_service("media-immich"));
-    }
-
-    #[test]
-    fn test_is_bootstrap_service_empty_list() {
-        let ctx = Context {
-            is_root: false,
-            systemd_dir: PathBuf::from("/tmp"),
-            compose_base: PathBuf::from("/tmp"),
-            env_file: PathBuf::from("/tmp/compose.env"),
-            docker_host: None,
-            infisical_project_id: None,
-            infisical_env: None,
-            infisical_address: None,
-            infisical_bootstrap: vec![],
-        };
-        assert!(!ctx.is_bootstrap_service("db-postgres"));
-    }
-
-    #[test]
-    fn test_should_use_infisical_no_project_id() {
-        let ctx = Context {
-            is_root: false,
-            systemd_dir: PathBuf::from("/tmp"),
-            compose_base: PathBuf::from("/tmp"),
-            env_file: PathBuf::from("/tmp/compose.env"),
-            docker_host: None,
-            infisical_project_id: None,
-            infisical_env: None,
-            infisical_address: None,
-            infisical_bootstrap: vec![],
-        };
-        assert!(!should_use_infisical(&ctx));
-    }
-
-    // --- extract_infisical_config tests ---
-
-    #[test]
-    fn test_extract_infisical_config_empty() {
-        let config = HashMap::new();
-        let result = extract_infisical_config(&config).unwrap();
-        assert!(result.project_id.is_none());
-        assert!(result.env.is_none());
-        assert!(result.address.is_none());
-        assert!(result.bootstrap.is_empty());
-    }
-
-    #[test]
-    fn test_extract_infisical_config_all_fields() {
-        let mut config = HashMap::new();
-        config.insert("INFISICAL_PROJECT_ID".to_string(), "proj-123".to_string());
-        config.insert("INFISICAL_ENV".to_string(), "staging".to_string());
-        config.insert(
-            "INFISICAL_ADDRESS".to_string(),
-            "https://infisical.example.com".to_string(),
-        );
-        config.insert(
-            "INFISICAL_BOOTSTRAP".to_string(),
-            "db/postgres,db/valkey,infra/infisical".to_string(),
-        );
-
-        let result = extract_infisical_config(&config).unwrap();
-        assert_eq!(result.project_id, Some("proj-123".to_string()));
-        assert_eq!(result.env, Some("staging".to_string()));
-        assert_eq!(
-            result.address,
-            Some("https://infisical.example.com".to_string())
-        );
-        assert_eq!(result.bootstrap.len(), 3);
-        assert_eq!(result.bootstrap[0], "db/postgres");
-        assert_eq!(result.bootstrap[1], "db/valkey");
-        assert_eq!(result.bootstrap[2], "infra/infisical");
-    }
-
-    #[test]
-    fn test_extract_infisical_config_project_id_only() {
-        let mut config = HashMap::new();
-        config.insert("INFISICAL_PROJECT_ID".to_string(), "proj-123".to_string());
-
-        let result = extract_infisical_config(&config).unwrap();
-        assert_eq!(result.project_id, Some("proj-123".to_string()));
-        assert!(result.env.is_none());
-        assert!(result.address.is_none());
-        assert!(result.bootstrap.is_empty());
-    }
-
-    #[test]
-    fn test_extract_infisical_config_invalid_url() {
-        let mut config = HashMap::new();
-        config.insert("INFISICAL_ADDRESS".to_string(), "not-a-url".to_string());
-
-        let result = extract_infisical_config(&config);
-        assert!(result.is_err());
-    }
-
-    #[test]
-    fn test_extract_infisical_config_invalid_bootstrap() {
-        let mut config = HashMap::new();
-        config.insert(
-            "INFISICAL_BOOTSTRAP".to_string(),
-            "db/postgres,,db/valkey".to_string(),
-        );
-
-        let result = extract_infisical_config(&config);
-        assert!(result.is_err());
-    }
-
-    #[test]
-    fn test_extract_infisical_config_bootstrap_with_spaces() {
-        let mut config = HashMap::new();
-        config.insert(
-            "INFISICAL_BOOTSTRAP".to_string(),
-            "db/postgres, db/valkey, infra/infisical".to_string(),
-        );
-
-        let result = extract_infisical_config(&config).unwrap();
-        assert_eq!(result.bootstrap.len(), 3);
-        assert_eq!(result.bootstrap[0], "db/postgres");
-        assert_eq!(result.bootstrap[1], "db/valkey");
-    }
-
-    #[test]
-    fn test_extract_infisical_config_ftp_url_rejected() {
-        let mut config = HashMap::new();
-        config.insert(
-            "INFISICAL_ADDRESS".to_string(),
-            "ftp://example.com".to_string(),
-        );
-
-        let result = extract_infisical_config(&config);
-        assert!(result.is_err());
-    }
-
-    #[test]
-    fn test_extract_infisical_config_http_url_accepted() {
-        let mut config = HashMap::new();
-        config.insert(
-            "INFISICAL_ADDRESS".to_string(),
-            "http://localhost:8080".to_string(),
-        );
-
-        let result = extract_infisical_config(&config).unwrap();
-        assert_eq!(result.address, Some("http://localhost:8080".to_string()));
     }
 }

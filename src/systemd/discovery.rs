@@ -76,10 +76,6 @@ mod tests {
             compose_base: compose_base.to_path_buf(),
             env_file: PathBuf::from("/tmp/test-compose.env"),
             docker_host: None,
-            infisical_project_id: None,
-            infisical_env: None,
-            infisical_address: None,
-            infisical_bootstrap: vec![],
         }
     }
 

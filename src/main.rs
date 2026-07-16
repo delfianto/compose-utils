@@ -14,7 +14,7 @@ mod compose;
 mod core;
 mod systemd;
 
-use crate::commands::{config, deps, secret};
+use crate::commands::{config, deps};
 use crate::core::{enable_json, enable_verbose, get_context};
 
 // ---------------------------------------------------------------------------
@@ -66,8 +66,6 @@ enum ComposeCommands {
         /// List of service names to filter by (optional).
         services: Vec<String>,
     },
-    /// Manage Infisical secrets for a service.
-    Secret(secret::SecretArgs),
     /// View or update global configuration.
     Config(Box<config::ConfigArgs>),
 }
@@ -150,8 +148,6 @@ enum CtlCommands {
     },
     /// Manage service dependencies.
     Deps(deps::DepsArgs),
-    /// Manage Infisical secrets for a service.
-    Secret(secret::SecretArgs),
     /// View or update global configuration.
     Config(Box<config::ConfigArgs>),
 
@@ -214,7 +210,6 @@ fn run_compose() -> Result<()> {
         ComposeCommands::Restart { services } => commands::compose_restart(&ctx, &services),
         ComposeCommands::Pull { services } => commands::run_pull(&ctx, &services),
         ComposeCommands::Ps { services } => commands::ps::run_ps(&ctx, &services),
-        ComposeCommands::Secret(args) => secret::run(&ctx, args),
         ComposeCommands::Config(args) => config::run(&ctx, *args),
     }
 }
@@ -240,7 +235,6 @@ fn run_composectl() -> Result<()> {
         CtlCommands::Enable { services, deps } => commands::run_enable(&ctx, &services, deps),
         CtlCommands::Disable { services } => commands::run_disable(&ctx, &services),
         CtlCommands::Deps(args) => deps::run(&ctx, args),
-        CtlCommands::Secret(args) => secret::run(&ctx, args),
         CtlCommands::Config(args) => config::run(&ctx, *args),
 
         CtlCommands::RunService { service } => commands::internal::run_service(&ctx, &service),
