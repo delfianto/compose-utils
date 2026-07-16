@@ -1139,10 +1139,7 @@ mod tests {
         let mut config = HashMap::new();
         config.insert("COMPOSE_DATA".to_string(), "/data".to_string());
         config.insert("INFISICAL_PROJECT_ID".to_string(), "proj-123".to_string());
-        config.insert(
-            "INFISICAL_BOOTSTRAP".to_string(),
-            "db/postgres".to_string(),
-        );
+        config.insert("INFISICAL_BOOTSTRAP".to_string(), "db/postgres".to_string());
         write_config(&ctx, &config).unwrap();
         let content = test_dir.read_env();
         // Infisical keys should come after COMPOSE_DATA (known-key ordering)

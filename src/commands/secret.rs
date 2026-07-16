@@ -4,7 +4,7 @@
 //! to Infisical secret paths. All operations are NO-OP with a warning
 //! if Infisical is not configured or not available.
 
-use crate::core::{should_use_infisical, Context};
+use crate::core::{Context, should_use_infisical};
 use crate::systemd::discovery::resolve_services;
 use crate::systemd::service::get_bare_name;
 use anyhow::{Result, bail};
@@ -76,7 +76,11 @@ pub fn run(ctx: &Context, args: SecretArgs) -> Result<()> {
             let bare = resolve_single_service(ctx, service.as_deref())?;
             get_secret(ctx, &bare, &key)
         }
-        SecretAction::Set { key, value, service } => {
+        SecretAction::Set {
+            key,
+            value,
+            service,
+        } => {
             let bare = resolve_single_service(ctx, service.as_deref())?;
             set_secret(ctx, &bare, &key, &value)
         }
@@ -387,7 +391,9 @@ mod tests {
     fn test_run_noop_when_not_configured() {
         let ctx = ctx_without_infisical();
         let args = SecretArgs {
-            action: SecretAction::List { service: Some("myapp".to_string()) },
+            action: SecretAction::List {
+                service: Some("myapp".to_string()),
+            },
         };
         // Should return Ok(()) without attempting any infisical operations
         let result = run(&ctx, args);

@@ -1,6 +1,6 @@
 //! Direct Docker Compose operations (no systemd indirection).
 
-use crate::core::{Report, should_use_infisical, Context};
+use crate::core::{Context, Report, should_use_infisical};
 use crate::systemd::discovery::resolve_services;
 use crate::systemd::service::{get_bare_name, get_compose_dir};
 use anyhow::{Context as _, Result};
@@ -161,7 +161,10 @@ fn run_lifecycle(
 pub fn compose_up(ctx: &Context, names: &[String]) -> Result<()> {
     let results = run_lifecycle(ctx, names, &["up", "-d"], "Starting", "Started", "started")?;
     if crate::core::is_json() {
-        crate::core::print_json(&Report { command: "up", results })?;
+        crate::core::print_json(&Report {
+            command: "up",
+            results,
+        })?;
     }
     Ok(())
 }
@@ -177,7 +180,10 @@ pub fn compose_down(ctx: &Context, names: &[String]) -> Result<()> {
         "stopped",
     )?;
     if crate::core::is_json() {
-        crate::core::print_json(&Report { command: "down", results })?;
+        crate::core::print_json(&Report {
+            command: "down",
+            results,
+        })?;
     }
     Ok(())
 }
@@ -202,7 +208,10 @@ pub fn compose_restart(ctx: &Context, names: &[String]) -> Result<()> {
                 status: "restarted".to_string(),
             })
             .collect();
-        crate::core::print_json(&Report { command: "restart", results })?;
+        crate::core::print_json(&Report {
+            command: "restart",
+            results,
+        })?;
     }
 
     Ok(())
@@ -313,8 +322,7 @@ mod tests {
     #[test]
     fn test_build_command_down_with_infisical() {
         let ctx = ctx_with_infisical();
-        let cmd =
-            build_compose_command(&ctx, "ai-ollama", &["down", "--remove-orphans"], true);
+        let cmd = build_compose_command(&ctx, "ai-ollama", &["down", "--remove-orphans"], true);
         let debug = format!("{:?}", cmd);
         assert!(debug.contains("infisical"));
         assert!(debug.contains("/ai-ollama"));

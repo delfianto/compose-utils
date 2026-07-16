@@ -1,6 +1,6 @@
 //! High-level command implementations for managing systemd compose services.
 
-use crate::core::{Report, Context};
+use crate::core::{Context, Report};
 use crate::systemd::discovery::resolve_services;
 use crate::systemd::service::{get_bare_name, get_compose_dir, normalize_unit_name};
 use anyhow::Result;
@@ -112,7 +112,10 @@ pub fn run_start(ctx: &Context, names: &[String], deps_path: Option<String>) -> 
     }
 
     if json {
-        crate::core::print_json(&Report { command: "start", results })?;
+        crate::core::print_json(&Report {
+            command: "start",
+            results,
+        })?;
     }
 
     Ok(())
@@ -146,7 +149,10 @@ pub fn run_stop(ctx: &Context, names: &[String]) -> Result<()> {
     }
 
     if json {
-        crate::core::print_json(&Report { command: "stop", results })?;
+        crate::core::print_json(&Report {
+            command: "stop",
+            results,
+        })?;
     }
 
     Ok(())
@@ -181,7 +187,10 @@ pub fn run_restart(ctx: &Context, names: &[String]) -> Result<()> {
     }
 
     if json {
-        crate::core::print_json(&Report { command: "restart", results })?;
+        crate::core::print_json(&Report {
+            command: "restart",
+            results,
+        })?;
     }
 
     Ok(())
@@ -265,7 +274,10 @@ pub fn run_sync(ctx: &Context, names: &[String]) -> Result<()> {
     }
 
     if json {
-        crate::core::print_json(&Report { command: "sync", results })?;
+        crate::core::print_json(&Report {
+            command: "sync",
+            results,
+        })?;
     }
 
     Ok(())
@@ -312,7 +324,10 @@ pub fn run_status(ctx: &Context, names: &[String]) -> Result<()> {
     }
 
     if json {
-        crate::core::print_json(&Report { command: "status", results })?;
+        crate::core::print_json(&Report {
+            command: "status",
+            results,
+        })?;
     }
 
     Ok(())
@@ -348,7 +363,10 @@ pub fn run_enable(ctx: &Context, names: &[String], deps_path: Option<String>) ->
     }
 
     if json {
-        crate::core::print_json(&Report { command: "enable", results })?;
+        crate::core::print_json(&Report {
+            command: "enable",
+            results,
+        })?;
     }
 
     Ok(())
@@ -380,7 +398,10 @@ pub fn run_disable(ctx: &Context, names: &[String]) -> Result<()> {
     }
 
     if json {
-        crate::core::print_json(&Report { command: "disable", results })?;
+        crate::core::print_json(&Report {
+            command: "disable",
+            results,
+        })?;
     }
 
     Ok(())

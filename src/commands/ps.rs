@@ -96,7 +96,10 @@ pub fn run_ps(ctx: &Context, _services: &[String]) -> Result<()> {
 
     let ids: Vec<String> = entries.iter().map(|e| e.id.clone()).collect();
     let details = inspect_details(ctx, &ids)?;
-    let rows: Vec<Row> = entries.into_iter().map(|e| build_row(e, &details)).collect();
+    let rows: Vec<Row> = entries
+        .into_iter()
+        .map(|e| build_row(e, &details))
+        .collect();
 
     if crate::core::is_json() {
         let results = rows
@@ -111,7 +114,10 @@ pub fn run_ps(ctx: &Context, _services: &[String]) -> Result<()> {
                 ports: r.ports.clone(),
             })
             .collect();
-        crate::core::print_json(&Report { command: "ps", results })?;
+        crate::core::print_json(&Report {
+            command: "ps",
+            results,
+        })?;
         return Ok(());
     }
 
@@ -129,7 +135,10 @@ fn list_containers(ctx: &Context) -> Result<Vec<PsEntry>> {
     let output = cmd.output().context("Failed to execute docker ps")?;
 
     if !output.status.success() {
-        anyhow::bail!("docker ps failed: {}", String::from_utf8_lossy(&output.stderr));
+        anyhow::bail!(
+            "docker ps failed: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
     }
 
     String::from_utf8_lossy(&output.stdout)
@@ -199,7 +208,11 @@ fn build_row(entry: PsEntry, details: &HashMap<String, InspectDetail>) -> Row {
                 image,
                 ports,
                 state: detail.state.clone(),
-                health: if detail.health.is_empty() { None } else { Some(detail.health.clone()) },
+                health: if detail.health.is_empty() {
+                    None
+                } else {
+                    Some(detail.health.clone())
+                },
                 started: detail.started,
                 finished: detail.finished,
                 inspected: true,
@@ -278,14 +291,41 @@ fn render_table(rows: &[Row]) {
         .iter()
         .map(|r| {
             let (status, color) = status_cell(r);
-            Cell { name: &r.name, id: &r.id, image: &r.image, status, color, ports: &r.ports }
+            Cell {
+                name: &r.name,
+                id: &r.id,
+                image: &r.image,
+                status,
+                color,
+                ports: &r.ports,
+            }
         })
         .collect();
 
-    let name_w = cells.iter().map(|c| c.name.chars().count()).max().unwrap_or(0).max(5);
-    let id_w = cells.iter().map(|c| c.id.chars().count()).max().unwrap_or(0).max(2);
-    let image_w = cells.iter().map(|c| c.image.chars().count()).max().unwrap_or(0).max(5);
-    let status_w = cells.iter().map(|c| c.status.chars().count()).max().unwrap_or(0).max(6);
+    let name_w = cells
+        .iter()
+        .map(|c| c.name.chars().count())
+        .max()
+        .unwrap_or(0)
+        .max(5);
+    let id_w = cells
+        .iter()
+        .map(|c| c.id.chars().count())
+        .max()
+        .unwrap_or(0)
+        .max(2);
+    let image_w = cells
+        .iter()
+        .map(|c| c.image.chars().count())
+        .max()
+        .unwrap_or(0)
+        .max(5);
+    let status_w = cells
+        .iter()
+        .map(|c| c.status.chars().count())
+        .max()
+        .unwrap_or(0)
+        .max(6);
 
     let header = format!(
         "{:<name_w$}  {:<id_w$}  {:<image_w$}  {:<status_w$}  PORTS",
@@ -336,8 +376,13 @@ fn parse_port_lines(ports: &str) -> Vec<String> {
         return vec!["-".to_string()];
     }
 
-    let entries: Vec<&str> = ports.split(',').map(|e| e.trim()).filter(|e| !e.is_empty()).collect();
-    let (mut bound, exposed): (Vec<&str>, Vec<&str>) = entries.into_iter().partition(|e| e.contains("->"));
+    let entries: Vec<&str> = ports
+        .split(',')
+        .map(|e| e.trim())
+        .filter(|e| !e.is_empty())
+        .collect();
+    let (mut bound, exposed): (Vec<&str>, Vec<&str>) =
+        entries.into_iter().partition(|e| e.contains("->"));
 
     let bound_set: HashSet<&str> = bound.iter().copied().collect();
     bound.retain(|e| match e.strip_prefix("[::]:") {
@@ -352,7 +397,11 @@ fn parse_port_lines(ports: &str) -> Vec<String> {
         lines.push(exposed.join(", "));
     }
 
-    if lines.is_empty() { vec!["-".to_string()] } else { lines }
+    if lines.is_empty() {
+        vec!["-".to_string()]
+    } else {
+        lines
+    }
 }
 
 fn host_port(entry: &str) -> u32 {
@@ -519,21 +568,30 @@ mod tests {
 
     #[test]
     fn test_format_clock_under_a_day() {
-        let now = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs() as i64;
+        let now = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_secs() as i64;
         let since = now - 3661; // 1h 01m ago
         assert_eq!(format_clock(Some(since)), "01:01");
     }
 
     #[test]
     fn test_format_clock_multi_day() {
-        let now = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs() as i64;
+        let now = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_secs() as i64;
         let since = now - (2 * 86_400 + 3 * 3600 + 4 * 60); // 2d 03:04 ago
         assert_eq!(format_clock(Some(since)), "2d 03:04");
     }
 
     #[test]
     fn test_format_clock_future_timestamp_clamped() {
-        let now = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs() as i64;
+        let now = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_secs() as i64;
         assert_eq!(format_clock(Some(now + 1000)), "00:00");
     }
 
@@ -574,7 +632,10 @@ mod tests {
         let result = parse_port_lines("0.0.0.0:443->443/tcp, 0.0.0.0:80->80/tcp");
         assert_eq!(
             result,
-            vec!["0.0.0.0:80->80/tcp".to_string(), "0.0.0.0:443->443/tcp".to_string()]
+            vec![
+                "0.0.0.0:80->80/tcp".to_string(),
+                "0.0.0.0:443->443/tcp".to_string()
+            ]
         );
     }
 
@@ -599,12 +660,20 @@ mod tests {
     #[test]
     fn test_parse_port_lines_bound_and_exposed() {
         let result = parse_port_lines("0.0.0.0:80->80/tcp, 3000/tcp");
-        assert_eq!(result, vec!["0.0.0.0:80->80/tcp".to_string(), "3000/tcp".to_string()]);
+        assert_eq!(
+            result,
+            vec!["0.0.0.0:80->80/tcp".to_string(), "3000/tcp".to_string()]
+        );
     }
 
     // --- status_cell ---
 
-    fn make_row(state: &str, health: Option<&str>, started: Option<i64>, finished: Option<i64>) -> Row {
+    fn make_row(
+        state: &str,
+        health: Option<&str>,
+        started: Option<i64>,
+        finished: Option<i64>,
+    ) -> Row {
         Row {
             name: "test".to_string(),
             id: "abc".to_string(),
@@ -685,7 +754,10 @@ mod tests {
 
     #[test]
     fn test_uptime_json_running() {
-        let now = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs() as i64;
+        let now = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_secs() as i64;
         let row = make_row("running", None, Some(now - 60), None);
         assert_eq!(uptime_json(&row), Some("00:01".to_string()));
     }
@@ -705,7 +777,10 @@ mod tests {
 
     #[test]
     fn test_uptime_json_exited_uses_finished() {
-        let now = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs() as i64;
+        let now = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_secs() as i64;
         let row = make_row("exited", None, None, Some(now - 120));
         assert_eq!(uptime_json(&row), Some("00:02".to_string()));
     }

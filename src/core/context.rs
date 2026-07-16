@@ -80,7 +80,10 @@ fn extract_infisical_config(config: &HashMap<String, String>) -> Result<Infisica
         validation::validate_url(addr)?;
     }
 
-    let bootstrap_raw = config.get("INFISICAL_BOOTSTRAP").cloned().unwrap_or_default();
+    let bootstrap_raw = config
+        .get("INFISICAL_BOOTSTRAP")
+        .cloned()
+        .unwrap_or_default();
     if !bootstrap_raw.is_empty() {
         validation::validate_bootstrap_list(&bootstrap_raw)?;
     }
@@ -612,10 +615,17 @@ mod tests {
         let dir = tempdir().unwrap();
         let file_path = dir.path().join("utf8.env");
 
-        std::fs::write(&file_path, "GREETING=\u{00E9}l\u{00E8}ve\nCITY=Z\u{00FC}rich\n").unwrap();
+        std::fs::write(
+            &file_path,
+            "GREETING=\u{00E9}l\u{00E8}ve\nCITY=Z\u{00FC}rich\n",
+        )
+        .unwrap();
 
         let config = read_env_file(&file_path).unwrap();
-        assert_eq!(config.get("GREETING"), Some(&"\u{00E9}l\u{00E8}ve".to_string()));
+        assert_eq!(
+            config.get("GREETING"),
+            Some(&"\u{00E9}l\u{00E8}ve".to_string())
+        );
         assert_eq!(config.get("CITY"), Some(&"Z\u{00FC}rich".to_string()));
     }
 
@@ -792,10 +802,7 @@ mod tests {
     #[test]
     fn test_extract_infisical_config_invalid_url() {
         let mut config = HashMap::new();
-        config.insert(
-            "INFISICAL_ADDRESS".to_string(),
-            "not-a-url".to_string(),
-        );
+        config.insert("INFISICAL_ADDRESS".to_string(), "not-a-url".to_string());
 
         let result = extract_infisical_config(&config);
         assert!(result.is_err());
@@ -848,9 +855,6 @@ mod tests {
         );
 
         let result = extract_infisical_config(&config).unwrap();
-        assert_eq!(
-            result.address,
-            Some("http://localhost:8080".to_string())
-        );
+        assert_eq!(result.address, Some("http://localhost:8080".to_string()));
     }
 }

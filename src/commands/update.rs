@@ -1,5 +1,5 @@
 use crate::commands::pull::pull_images;
-use crate::core::{Report, Context};
+use crate::core::{Context, Report};
 use crate::systemd::discovery::resolve_services;
 use crate::systemd::manager::restart_unit;
 use crate::systemd::service::{get_bare_name, normalize_unit_name};
@@ -21,7 +21,7 @@ pub fn run_update(ctx: &Context, services: &[String]) -> Result<()> {
     let mut results = Vec::new();
 
     for service in services {
-        let pull_result = pull_images(ctx, &[service.to_string()])?
+        let pull_result = pull_images(ctx, std::slice::from_ref(&service))?
             .into_iter()
             .next()
             .expect("pull_images returns exactly one result per requested service");
@@ -40,7 +40,10 @@ pub fn run_update(ctx: &Context, services: &[String]) -> Result<()> {
     }
 
     if json {
-        crate::core::print_json(&Report { command: "update", results })?;
+        crate::core::print_json(&Report {
+            command: "update",
+            results,
+        })?;
     }
 
     Ok(())

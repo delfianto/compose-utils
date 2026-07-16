@@ -54,7 +54,9 @@ mod tests {
 
         let report = Report {
             command: "test",
-            results: vec![Item { name: "a".to_string() }],
+            results: vec![Item {
+                name: "a".to_string(),
+            }],
         };
 
         let json = serde_json::to_string(&report).unwrap();
