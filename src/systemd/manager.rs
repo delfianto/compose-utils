@@ -47,7 +47,11 @@ pub fn get_reverse_dependents(ctx: &Context, unit: &str) -> Result<Vec<String>> 
 
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr);
-        bail!("Failed to get reverse dependents for {}: {}", unit, stderr.trim());
+        bail!(
+            "Failed to get reverse dependents for {}: {}",
+            unit,
+            stderr.trim()
+        );
     }
 
     let mut seen = std::collections::HashSet::new();
@@ -82,7 +86,10 @@ pub fn get_unit_dependencies(ctx: &Context, unit: &str) -> Result<HashMap<String
     let mut deps = HashMap::new();
     for line in String::from_utf8_lossy(&output.stdout).lines() {
         if let Some((key, val)) = line.split_once('=') {
-            deps.insert(key.to_string(), val.split_whitespace().map(String::from).collect());
+            deps.insert(
+                key.to_string(),
+                val.split_whitespace().map(String::from).collect(),
+            );
         }
     }
 

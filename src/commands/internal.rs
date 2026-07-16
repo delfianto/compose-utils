@@ -1,7 +1,7 @@
 //! Internal commands called by systemd unit templates.
 
 use crate::commands::compose_direct::build_compose_command;
-use crate::core::{should_use_infisical, Context};
+use crate::core::{Context, should_use_infisical};
 use crate::verbose;
 use anyhow::Result;
 use std::os::unix::process::CommandExt;
@@ -25,8 +25,12 @@ pub fn stop_service(ctx: &Context, service: &str) -> Result<()> {
         verbose!("Infisical configured but not available, using plain docker compose");
     }
 
-    let mut cmd =
-        build_compose_command(ctx, service, &["down", "--remove-orphans"], infisical_available);
+    let mut cmd = build_compose_command(
+        ctx,
+        service,
+        &["down", "--remove-orphans"],
+        infisical_available,
+    );
     let err = cmd.exec();
     Err(anyhow::anyhow!("Failed to exec compose command: {}", err))
 }

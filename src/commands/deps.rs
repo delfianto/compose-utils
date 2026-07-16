@@ -143,10 +143,11 @@ fn discover_compose_units(ctx: &Context) -> Result<Vec<String>> {
     queue.push_back("docker.service".to_string());
 
     while let Some(unit) = queue.pop_front() {
-        let mut dependents: Vec<String> = crate::systemd::manager::get_reverse_dependents(ctx, &unit)?
-            .into_iter()
-            .filter(|u| is_compose_unit(u))
-            .collect();
+        let mut dependents: Vec<String> =
+            crate::systemd::manager::get_reverse_dependents(ctx, &unit)?
+                .into_iter()
+                .filter(|u| is_compose_unit(u))
+                .collect();
         dependents.sort();
 
         for dep in dependents {
@@ -172,7 +173,10 @@ fn discover_compose_units(ctx: &Context) -> Result<Vec<String>> {
 /// noise rather than information.
 fn service_entry(ctx: &Context, unit: &str) -> Result<ServiceEntry> {
     let props = crate::systemd::manager::get_unit_properties(ctx, unit)?;
-    let state = props.get("ActiveState").cloned().unwrap_or_else(|| "unknown".to_string());
+    let state = props
+        .get("ActiveState")
+        .cloned()
+        .unwrap_or_else(|| "unknown".to_string());
 
     let fwd = crate::systemd::manager::get_unit_dependencies(ctx, unit)?;
     let compose_only = |key: &str| -> Vec<String> {
@@ -195,7 +199,11 @@ fn service_entry(ctx: &Context, unit: &str) -> Result<ServiceEntry> {
 
     let wanted = compose_only("Wants");
 
-    Ok(ServiceEntry { state, required, wanted })
+    Ok(ServiceEntry {
+        state,
+        required,
+        wanted,
+    })
 }
 
 /// Returns the path to the systemd drop-in override directory for a service.
@@ -1033,10 +1041,7 @@ mod tests {
         let dir = tempdir().unwrap();
         let file = dir.path().join("test.conf");
         let mut deps: SystemdDeps = BTreeMap::new();
-        deps.insert(
-            "Requires".to_string(),
-            vec!["docker.service".to_string()],
-        );
+        deps.insert("Requires".to_string(), vec!["docker.service".to_string()]);
         deps.insert(
             "Wants".to_string(),
             vec!["compose@cache.service".to_string()],
@@ -1074,10 +1079,7 @@ mod tests {
         deps.insert("Requires".to_string(), Vec::new());
         deps.insert("Wants".to_string(), Vec::new());
         deps.insert("BindsTo".to_string(), Vec::new());
-        deps.insert(
-            "After".to_string(),
-            vec!["docker.service".to_string()],
-        );
+        deps.insert("After".to_string(), vec!["docker.service".to_string()]);
 
         write_override_file(&file, &deps).unwrap();
         let content = fs::read_to_string(&file).unwrap();

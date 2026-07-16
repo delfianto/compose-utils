@@ -113,10 +113,7 @@ pub fn validate_bootstrap_list(list: &str) -> Result<()> {
             bail!("INFISICAL_BOOTSTRAP contains empty entry in: {}", list);
         }
         if entry.contains(' ') {
-            bail!(
-                "INFISICAL_BOOTSTRAP entry '{}' contains spaces",
-                entry
-            );
+            bail!("INFISICAL_BOOTSTRAP entry '{}' contains spaces", entry);
         }
     }
     Ok(())

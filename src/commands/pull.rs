@@ -1,7 +1,7 @@
 //! Logic for pulling Docker Compose images.
 
 use crate::commands::compose_direct::build_compose_command;
-use crate::core::{Report, should_use_infisical, Context};
+use crate::core::{Context, Report, should_use_infisical};
 use crate::systemd::service::{get_bare_name, get_compose_dir};
 use anyhow::{Context as _, Result};
 use serde::Serialize;
@@ -57,7 +57,10 @@ pub fn run_pull(ctx: &Context, services: &[String]) -> Result<()> {
     let results = pull_images(ctx, services)?;
 
     if crate::core::is_json() {
-        crate::core::print_json(&Report { command: "pull", results })?;
+        crate::core::print_json(&Report {
+            command: "pull",
+            results,
+        })?;
     }
 
     Ok(())
