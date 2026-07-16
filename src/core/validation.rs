@@ -77,48 +77,6 @@ pub fn validate_acme_server(server: &str) -> Result<()> {
     Ok(())
 }
 
-/// Validates that a string is a well-formed URL with http or https scheme.
-///
-/// Unlike [`validate_acme_server`], this does not check DNS resolution,
-/// since the Infisical server may not be reachable from the config machine.
-pub fn validate_url(url_str: &str) -> Result<()> {
-    let url = Url::parse(url_str)
-        .with_context(|| format!("INFISICAL_ADDRESS must be a valid URL: {}", url_str))?;
-
-    if url.scheme() != "https" && url.scheme() != "http" {
-        bail!(
-            "INFISICAL_ADDRESS must use http or https scheme: {}",
-            url_str
-        );
-    }
-
-    if url.host_str().is_none() {
-        bail!("INFISICAL_ADDRESS URL must have a host: {}", url_str);
-    }
-
-    Ok(())
-}
-
-/// Validates that a bootstrap list string is well-formed.
-///
-/// Accepts comma-separated service names. Empty string is valid (no bootstrap services).
-/// Rejects empty entries (double commas) and entries containing spaces.
-pub fn validate_bootstrap_list(list: &str) -> Result<()> {
-    if list.trim().is_empty() {
-        return Ok(());
-    }
-    for entry in list.split(',') {
-        let entry = entry.trim();
-        if entry.is_empty() {
-            bail!("INFISICAL_BOOTSTRAP contains empty entry in: {}", list);
-        }
-        if entry.contains(' ') {
-            bail!("INFISICAL_BOOTSTRAP entry '{}' contains spaces", entry);
-        }
-    }
-    Ok(())
-}
-
 /// Validates a Docker host string (supporting `unix://`, `tcp://`, and `ssh://`).
 pub fn validate_docker_host(host: &str) -> Result<()> {
     if let Some(socket_path) = host.strip_prefix("unix://") {
@@ -474,77 +432,5 @@ mod tests {
     fn test_validate_docker_host_invalid_random() {
         assert!(validate_docker_host("random").is_err());
         assert!(validate_docker_host("localhost:2375").is_err());
-    }
-
-    // --- URL validation tests (for Infisical address) ---
-
-    #[test]
-    fn test_validate_url_https() {
-        assert!(validate_url("https://infisical.example.com").is_ok());
-    }
-
-    #[test]
-    fn test_validate_url_http() {
-        assert!(validate_url("http://localhost:8080").is_ok());
-    }
-
-    #[test]
-    fn test_validate_url_with_path() {
-        assert!(validate_url("https://infisical.example.com/api/v1").is_ok());
-    }
-
-    #[test]
-    fn test_validate_url_invalid_scheme() {
-        assert!(validate_url("ftp://example.com").is_err());
-        assert!(validate_url("file:///etc/passwd").is_err());
-    }
-
-    #[test]
-    fn test_validate_url_not_a_url() {
-        assert!(validate_url("not a url").is_err());
-        assert!(validate_url("example.com").is_err());
-    }
-
-    #[test]
-    fn test_validate_url_empty() {
-        assert!(validate_url("").is_err());
-    }
-
-    // --- Bootstrap list validation tests ---
-
-    #[test]
-    fn test_validate_bootstrap_list_valid() {
-        assert!(validate_bootstrap_list("db/postgres,db/valkey,infra/infisical").is_ok());
-    }
-
-    #[test]
-    fn test_validate_bootstrap_list_empty() {
-        assert!(validate_bootstrap_list("").is_ok());
-        assert!(validate_bootstrap_list("  ").is_ok());
-    }
-
-    #[test]
-    fn test_validate_bootstrap_list_single() {
-        assert!(validate_bootstrap_list("db/postgres").is_ok());
-    }
-
-    #[test]
-    fn test_validate_bootstrap_list_with_spaces_around_commas() {
-        assert!(validate_bootstrap_list("db/postgres, db/valkey, infra/infisical").is_ok());
-    }
-
-    #[test]
-    fn test_validate_bootstrap_list_empty_entry() {
-        assert!(validate_bootstrap_list("db/postgres,,db/valkey").is_err());
-    }
-
-    #[test]
-    fn test_validate_bootstrap_list_trailing_comma() {
-        assert!(validate_bootstrap_list("db/postgres,").is_err());
-    }
-
-    #[test]
-    fn test_validate_bootstrap_list_entry_with_space() {
-        assert!(validate_bootstrap_list("db postgres").is_err());
     }
 }

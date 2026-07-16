@@ -1,7 +1,7 @@
 //! Logic for pulling Docker Compose images.
 
 use crate::commands::compose_direct::build_compose_command;
-use crate::core::{Context, Report, should_use_infisical};
+use crate::core::{Context, Report};
 use crate::systemd::service::{get_bare_name, get_compose_dir};
 use anyhow::{Context as _, Result};
 use serde::Serialize;
@@ -19,7 +19,6 @@ pub struct PullResult {
 /// batch, matching the existing "continue on failure" behavior.
 pub fn pull_images(ctx: &Context, services: &[String]) -> Result<Vec<PullResult>> {
     let services = crate::systemd::discovery::resolve_services(ctx, services)?;
-    let infisical_available = should_use_infisical(ctx);
     let json = crate::core::is_json();
 
     let mut results = Vec::new();
@@ -31,7 +30,7 @@ pub fn pull_images(ctx: &Context, services: &[String]) -> Result<Vec<PullResult>
             println!(">> Pulling images for '{}'...", bare);
         }
 
-        let mut cmd = build_compose_command(ctx, bare, &["pull"], infisical_available);
+        let mut cmd = build_compose_command(ctx, bare, &["pull"]);
         let status = cmd.status().with_context(|| {
             format!(
                 "Failed to execute docker compose pull in {:?}",

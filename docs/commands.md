@@ -262,9 +262,8 @@ Every command supports `--json`, which switches stdout to a single parseable JSO
 
 - Progress/diagnostic lines (auto-detected service, "Loading dependencies...", etc.) are suppressed or moved to stderr in JSON mode, so stdout only ever contains the JSON document.
 - Most commands emit `{"command": "<name>", "results": [ ... ]}`, one object per requested service.
-- Commands that don't operate over a list of services (`config`, single-service `secret`/`deps` actions) emit a flat JSON object instead.
+- Commands that don't operate over a list of services (`config`, single-service `deps` actions) emit a flat JSON object instead.
 - On failure, the error is emitted as `{"status": "error", "error": "..."}` on stdout (rather than the default `Error: ...` text on stderr), and the process still exits non-zero.
-- `secret list`/`secret get` wrap Infisical's own CLI output as an opaque `"raw"` string field, since that formatting isn't under this tool's control.
 - `deps list` (with or without a service) returns `"edges"` (a flat `unit -> [direct reverse-dependents]` map) and `"states"` (`unit -> ActiveState`), built by recursively querying `systemctl show --property=RequiredBy,WantedBy,UpheldBy,PartOf,BoundBy --value` (the same edges `systemctl list-dependencies --reverse` draws), not by parsing that command's human-oriented tree/bullet rendering. Traversal is filtered to this tool's own `compose@*.service` units, dropping `default.target`/other systemd noise that every enabled unit points at but that conveys no real dependency information. A single service name also adds an `"overrides"` field with its explicit `Requires`/`Wants`/`After` drop-in config.
 
 Example:
