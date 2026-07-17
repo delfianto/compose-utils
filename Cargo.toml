@@ -13,7 +13,7 @@ anyhow = "1.0"
 clap = { version = "4.6", features = ["derive"] }
 directories = "6.0"
 nix = { version = "0.31", features = ["user"] }
-regex = "1.12"
+regex = "1.13"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = { version = "1.0", features = ["preserve_order"] }
 shellexpand = "3.1"
@@ -21,7 +21,7 @@ toml = "1.1"
 url = "2.5"
 
 [dev-dependencies]
-tempfile = "3.8"
+tempfile = "3.27"
 
 [profile.release]
 opt-level = "z"
