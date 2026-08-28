@@ -417,10 +417,10 @@ fn remove_deps(ctx: &Context, service: &str, deps_to_remove: &[String]) -> Resul
         let dep_name = crate::systemd::service::normalize_unit_name(ctx, dep);
 
         for key in ["Requires", "Wants", "After"] {
-            if let Some(list) = current_deps.get_mut(key) {
-                if let Some(pos) = list.iter().position(|x| x == &dep_name) {
-                    list.remove(pos);
-                }
+            if let Some(list) = current_deps.get_mut(key)
+                && let Some(pos) = list.iter().position(|x| x == &dep_name)
+            {
+                list.remove(pos);
             }
         }
     }
@@ -488,12 +488,12 @@ fn list_deps(ctx: &Context, service: &str) -> Result<()> {
     if let Some(deps) = overrides {
         println!("\nExplicit overrides in {}:", override_file.display());
         for key in ["Requires", "Wants", "After"] {
-            if let Some(v) = deps.get(key) {
-                if !v.is_empty() {
-                    println!("  {}:", key);
-                    for item in v {
-                        println!("    - {}", item);
-                    }
+            if let Some(v) = deps.get(key)
+                && !v.is_empty()
+            {
+                println!("  {}:", key);
+                for item in v {
+                    println!("    - {}", item);
                 }
             }
         }
