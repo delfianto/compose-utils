@@ -2,7 +2,25 @@
 
 use crate::core::Context;
 use crate::verbose;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
+
+/// Find existing directory boundaries while retaining hyphens inside names.
+fn resolve_hyphenated_path(base: &Path, name: &str) -> Option<String> {
+    if base.join(name).is_dir() {
+        return Some(name.to_string());
+    }
+    for (index, _) in name.match_indices('-') {
+        let parent = &name[..index];
+        let remainder = &name[index + 1..];
+        if parent.is_empty() || remainder.is_empty() || !base.join(parent).is_dir() {
+            continue;
+        }
+        if let Some(child) = resolve_hyphenated_path(&base.join(parent), remainder) {
+            return Some(format!("{parent}/{child}"));
+        }
+    }
+    None
+}
 
 /// Converts a project name to its corresponding directory path.
 ///
@@ -32,6 +50,15 @@ pub fn name_to_dir_path(ctx: &Context, name: &str) -> String {
             converted
         );
         return converted;
+    }
+
+    if let Some(resolved) = resolve_hyphenated_path(&ctx.compose_base, name) {
+        verbose!(
+            "Resolved flat name '{}' to nested path '{}'",
+            name,
+            resolved
+        );
+        return resolved;
     }
 
     name.to_string()
@@ -306,6 +333,46 @@ mod tests {
         let test_dir = TestDir::new("dir-path-none");
         let ctx = test_context(test_dir.path());
         assert_eq!(name_to_dir_path(&ctx, "nonexistent"), "nonexistent");
+    }
+
+    #[test]
+    fn test_hyphenated_nested_service_resolves_and_normalizes() {
+        let test_dir = TestDir::new("dir-path-hyphenated-service");
+        test_dir.create_dir("ai/comfyui-mcp");
+        let ctx = test_context(test_dir.path());
+        assert_eq!(name_to_dir_path(&ctx, "ai-comfyui-mcp"), "ai/comfyui-mcp");
+        assert_eq!(
+            normalize_unit_name(&ctx, "ai-comfyui-mcp"),
+            "compose@ai-comfyui-mcp.service"
+        );
+        assert_eq!(
+            normalize_unit_name(&ctx, "ai/comfyui-mcp"),
+            "compose@ai-comfyui-mcp.service"
+        );
+        assert_eq!(
+            get_compose_dir(&ctx, "compose@ai-comfyui-mcp.service"),
+            test_dir.path().join("ai/comfyui-mcp")
+        );
+    }
+
+    #[test]
+    fn test_hyphenated_categories_and_deeper_paths() {
+        let test_dir = TestDir::new("dir-path-hyphenated-category");
+        test_dir.create_dir("my-ai/tools/mcp-server");
+        let ctx = test_context(test_dir.path());
+        assert_eq!(
+            name_to_dir_path(&ctx, "my-ai-tools-mcp-server"),
+            "my-ai/tools/mcp-server"
+        );
+    }
+
+    #[test]
+    fn test_existing_fully_nested_path_keeps_precedence() {
+        let test_dir = TestDir::new("dir-path-hyphenated-precedence");
+        test_dir.create_dir("ai/comfyui-mcp");
+        test_dir.create_dir("ai/comfyui/mcp");
+        let ctx = test_context(test_dir.path());
+        assert_eq!(name_to_dir_path(&ctx, "ai-comfyui-mcp"), "ai/comfyui/mcp");
     }
 
     #[test]
