@@ -82,6 +82,11 @@ composectl status genai/ollama
 
 Settings are stored in `compose.env` (`/etc/compose.env` for root, `~/.config/docker/compose.env` for rootless):
 
+Project commands load that global file, then `.env` and `.env.local` when present.
+Missing project env files are skipped. A fixed `COMPOSE_ENV_FILES` export is not
+needed; the tool supplies ordered `--env-file` arguments itself. See
+[configuration](docs/configuration.md#environment-file-in-systemd) for precedence.
+
 ```bash
 # View current configuration
 compose config
