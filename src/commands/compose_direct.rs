@@ -26,6 +26,16 @@ pub(crate) fn build_compose_command(ctx: &Context, bare: &str, compose_args: &[&
 
     let mut cmd = Command::new("docker");
     cmd.arg("compose");
+    cmd.env_remove("COMPOSE_ENV_FILES");
+    for env_file in [
+        ctx.env_file.clone(),
+        dir.join(".env"),
+        dir.join(".env.local"),
+    ] {
+        if env_file.is_file() {
+            cmd.arg("--env-file").arg(env_file);
+        }
+    }
     cmd.args(compose_args);
     cmd.current_dir(&dir);
 
@@ -152,15 +162,7 @@ pub fn compose_restart(ctx: &Context, names: &[String]) -> Result<()> {
 /// state of the containers (e.g. after a manual `docker compose up`/`down`
 /// that bypassed systemd entirely).
 pub(crate) fn project_is_running(ctx: &Context, bare: &str) -> Result<bool> {
-    let dir = get_compose_dir(ctx, bare);
-
-    let mut cmd = Command::new("docker");
-    cmd.args(["compose", "ps", "--status", "running", "--quiet"]);
-    cmd.current_dir(&dir);
-
-    if let Some(ref host) = ctx.docker_host {
-        cmd.env("DOCKER_HOST", host);
-    }
+    let mut cmd = build_compose_command(ctx, bare, &["ps", "--status", "running", "--quiet"]);
 
     let output = cmd
         .output()
@@ -224,5 +226,104 @@ mod tests {
         let cmd = build_compose_command(&ctx, "myapp", &["up", "-d"]);
         let debug = format!("{:?}", cmd);
         assert!(debug.contains("DOCKER_HOST"));
+    }
+
+    #[test]
+    fn optional_env_files_are_selected_in_precedence_order() {
+        for (global, project, local) in [
+            (false, false, false),
+            (true, false, false),
+            (true, true, false),
+            (true, false, true),
+            (true, true, true),
+        ] {
+            let temp = tempfile::tempdir().unwrap();
+            let mut ctx = test_ctx();
+            ctx.compose_base = temp.path().join("projects");
+            ctx.env_file = temp.path().join("compose.env");
+            let dir = ctx.compose_base.join("ai/ollama");
+            std::fs::create_dir_all(&dir).unwrap();
+            let files = [
+                ctx.env_file.clone(),
+                dir.join(".env"),
+                dir.join(".env.local"),
+            ];
+            let present = [global, project, local];
+            for (file, exists) in files.iter().zip(present) {
+                if exists {
+                    std::fs::write(file, "VALUE=test\n").unwrap();
+                }
+            }
+            let cmd = build_compose_command(&ctx, "ai-ollama", &["config", "--quiet"]);
+            let mut expected = vec![std::ffi::OsString::from("compose")];
+            for (file, exists) in files.iter().zip(present) {
+                if exists {
+                    expected.push("--env-file".into());
+                    expected.push(file.as_os_str().to_owned());
+                }
+            }
+            expected.extend(["config".into(), "--quiet".into()]);
+            assert_eq!(cmd.get_args().collect::<Vec<_>>(), expected);
+            assert_eq!(cmd.get_current_dir(), Some(dir.as_path()));
+            assert!(
+                cmd.get_envs()
+                    .any(|(key, value)| key == "COMPOSE_ENV_FILES" && value.is_none())
+            );
+        }
+    }
+
+    #[test]
+    fn compose_interpolates_optional_files_without_requiring_project_env() {
+        if Command::new("docker")
+            .args(["compose", "version"])
+            .output()
+            .is_err()
+        {
+            return;
+        }
+        let temp = tempfile::tempdir().unwrap();
+        let mut ctx = test_ctx();
+        ctx.compose_base = temp.path().join("projects");
+        ctx.env_file = temp.path().join("compose.env");
+        let dir = ctx.compose_base.join("ai/ollama");
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(
+            &ctx.env_file,
+            "OPTIONAL_TEST_VALUE=global\nGLOBAL_ONLY=loaded\n",
+        )
+        .unwrap();
+        std::fs::write(dir.join("compose.yaml"),
+            "services:\n  app:\n    image: alpine\n    environment:\n      VALUE: ${OPTIONAL_TEST_VALUE}\n      GLOBAL: ${GLOBAL_ONLY}\n").unwrap();
+        for (project, local, expected) in [
+            (false, false, "global"),
+            (true, false, "project"),
+            (true, true, "local"),
+            (false, true, "local"),
+        ] {
+            for (name, present, value) in
+                [(".env", project, "project"), (".env.local", local, "local")]
+            {
+                let path = dir.join(name);
+                if present {
+                    std::fs::write(path, format!("OPTIONAL_TEST_VALUE={value}\n")).unwrap();
+                } else if path.exists() {
+                    std::fs::remove_file(path).unwrap();
+                }
+            }
+            let mut cmd = build_compose_command(&ctx, "ai-ollama", &["config", "--format", "json"]);
+            // Exercise the original failure even when the caller inherited this list.
+            cmd.env("COMPOSE_ENV_FILES", "missing.env,.env");
+            cmd.env_remove("OPTIONAL_TEST_VALUE");
+            cmd.env_remove("GLOBAL_ONLY");
+            let output = cmd.output().unwrap();
+            assert!(
+                output.status.success(),
+                "{}",
+                String::from_utf8_lossy(&output.stderr)
+            );
+            let config: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+            assert_eq!(config["services"]["app"]["environment"]["VALUE"], expected);
+            assert_eq!(config["services"]["app"]["environment"]["GLOBAL"], "loaded");
+        }
     }
 }

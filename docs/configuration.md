@@ -115,6 +115,21 @@ All values are validated before writing. If validation fails, the config file is
 
 ## Environment File in Systemd
 
+Every project command selects existing interpolation files in this order:
+
+1. The tool's global `compose.env` (path above).
+2. The project's `.env`, if present.
+3. The project's `.env.local`, if present.
+
+The tool passes these as ordered `--env-file` arguments. Missing files are
+skipped, so projects do not need an empty `.env`. This also applies to pulls,
+systemd starts/stops, and drift checks. The child process ignores inherited
+`COMPOSE_ENV_FILES`; no fixed global list is needed. Runtime Compose `env_file:`
+entries remain independent of these interpolation files.
+
+For direct commands, explicitly exported shell variables still outrank env-file
+values, following Compose's normal behavior.
+
 The systemd unit template loads environment from multiple sources (in order):
 
 ```ini
@@ -125,4 +140,10 @@ EnvironmentFile=-%h/.config/docker/compose.env
 
 The `-` prefix means "don't fail if the file doesn't exist." Later files override earlier ones. The `%h` expands to the user's home directory.
 
-These variables are available to `docker compose` via the shell environment, so compose files can reference `${COMPOSE_DATA}`, `${TRAEFIK_ACME_DOMAIN}`, etc.
+For systemd launches, global keys from the active config file are removed from
+the child process's inherited environment and read through `--env-file` instead.
+This allows project `.env`/`.env.local` values to override global defaults.
+The configured `DOCKER_HOST` remains authoritative for selecting the daemon.
+
+Raw `docker compose` commands do not use this wrapper. To get the same layering,
+pass the global file and whichever project files exist with `--env-file`.
