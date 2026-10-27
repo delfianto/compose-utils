@@ -33,6 +33,7 @@ Direct container operations with project discovery and centralized configuration
 | `compose up [services]` | `up` | Start containers (`docker compose up -d`) |
 | `compose down [services]` | `down` | Stop containers (`docker compose down`) |
 | `compose restart [services]` | `reup` | Restart containers |
+| `compose refresh [--dry-run]` | | Recreate running services with outdated local images |
 | `compose pull [services]` | | Pull images without restarting |
 | `compose ps [services]` | | List containers with status |
 | `compose config [options]` | | View or update configuration |
@@ -46,7 +47,17 @@ compose ps
 
 # Pull latest images
 compose pull genai/ollama
+
+# After upgrading/pulling images, preview and restart affected running services
+compose refresh --dry-run
+compose refresh
 ```
+
+`refresh` scans all running containers on the configured Docker daemon,
+compares their image IDs with the current local image references, and recreates
+affected Compose services. It does not pull images. Containers without reusable
+Compose metadata are reported as skipped. See the [command reference](docs/commands.md#compose-refresh)
+for details.
 
 ### `composectl` — systemd service controller
 

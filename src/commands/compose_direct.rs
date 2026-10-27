@@ -5,6 +5,7 @@ use crate::systemd::discovery::resolve_services;
 use crate::systemd::service::{get_bare_name, get_compose_dir};
 use anyhow::{Context as _, Result};
 use serde::Serialize;
+use std::path::Path;
 use std::process::Command;
 
 /// Per-service result for `compose up`/`down`/`restart`.
@@ -23,7 +24,14 @@ struct ComposeResult {
 /// * `compose_args` - Arguments to pass to `docker compose` (e.g., ["up", "-d"]).
 pub(crate) fn build_compose_command(ctx: &Context, bare: &str, compose_args: &[&str]) -> Command {
     let dir = get_compose_dir(ctx, bare);
+    build_compose_command_in_dir(ctx, &dir, compose_args)
+}
 
+pub(crate) fn build_compose_command_in_dir(
+    ctx: &Context,
+    dir: &Path,
+    compose_args: &[&str],
+) -> Command {
     let mut cmd = Command::new("docker");
     cmd.arg("compose");
     cmd.env_remove("COMPOSE_ENV_FILES");
@@ -37,7 +45,7 @@ pub(crate) fn build_compose_command(ctx: &Context, bare: &str, compose_args: &[&
         }
     }
     cmd.args(compose_args);
-    cmd.current_dir(&dir);
+    cmd.current_dir(dir);
 
     if let Some(ref host) = ctx.docker_host {
         cmd.env("DOCKER_HOST", host);
