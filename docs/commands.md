@@ -40,6 +40,43 @@ Alias: `reup`
 
 - Calls `compose down` then `compose up` in sequence
 
+### compose refresh
+
+Recreate running Compose services after images have been upgraded or pulled.
+
+```
+compose refresh [--dry-run]
+compose --json refresh [--dry-run]
+```
+
+This command recreates containers using existing local
+images; it does not build images. JSON reports use `"command": "refresh"`.
+
+- Scans all running containers on the configured Docker daemon, independently of CWD
+- Compares each container's image ID with the current local ID of its original
+  image reference (`Config.Image`); no registry queries or image pulls
+- Uses container labels to recover the Compose project name, working directory,
+  and ordered configuration files; loads global and optional project env files
+  using the same precedence as other `compose` commands
+- Groups affected services by project and runs
+  `docker compose --project-name NAME --file FILE ... up -d --no-deps --no-build --pull never SERVICE...`
+- Compose recreates services whose images changed and preserves mounted volumes;
+  unrelated services and dependencies are not started or restarted
+- Recreation operates at Compose service granularity: replicas of an affected
+  service are reconciled together, including stopped replicas. Services with no
+  running outdated containers are left alone
+- Paused, stopped, and one-off containers are excluded. Outdated standalone
+  containers, containers missing Compose metadata, and unavailable local image
+  references are reported as skipped
+- Original Compose files must still be accessible locally, including when using
+  a remote Docker daemon
+- `--dry-run` only inspects and reports affected services
+- JSON results contain `project`, `service`, `status` (`would_restart`,
+  `restarted`, or `skipped`), and an optional `reason`
+
+This command uses Docker Compose directly. It does not restart systemd units.
+An ordinary `docker restart` would continue using the container's old image.
+
 ### compose pull
 
 Pull latest images without restarting.

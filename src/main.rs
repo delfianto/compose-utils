@@ -56,6 +56,12 @@ enum ComposeCommands {
         /// List of service names to restart.
         services: Vec<String>,
     },
+    /// Recreate running Compose services whose local images have changed.
+    Refresh {
+        /// Show affected services without recreating containers.
+        #[arg(long)]
+        dry_run: bool,
+    },
     /// Pull images for services without restarting.
     Pull {
         /// List of service names to pull images for.
@@ -208,6 +214,7 @@ fn run_compose() -> Result<()> {
         ComposeCommands::Up { services } => commands::compose_up(&ctx, &services),
         ComposeCommands::Down { services } => commands::compose_down(&ctx, &services),
         ComposeCommands::Restart { services } => commands::compose_restart(&ctx, &services),
+        ComposeCommands::Refresh { dry_run } => commands::refresh::run(&ctx, dry_run),
         ComposeCommands::Pull { services } => commands::run_pull(&ctx, &services),
         ComposeCommands::Ps { services } => commands::ps::run_ps(&ctx, &services),
         ComposeCommands::Config(args) => config::run(&ctx, *args),
