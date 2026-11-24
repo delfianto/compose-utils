@@ -1,0 +1,23 @@
+pkgname=compose-utils-bin
+pkgver=0.3.0
+pkgrel=1
+pkgdesc='Docker Compose helper and systemd controller'
+arch=('x86_64')
+url='https://github.com/delfianto/compose-utils'
+license=('MIT')
+depends=('glibc' 'libgcc' 'docker' 'docker-compose' 'systemd')
+provides=("compose-utils=$pkgver")
+conflicts=('compose-utils')
+options=('!strip' '!debug')
+_archive="compose-utils-v$pkgver-linux-x86_64"
+source=("$url/releases/download/v$pkgver/$_archive.tar.gz")
+sha256sums=('15d7ae9ba78c1b1c3bd71838403c4fa7d1ea2cb31473214c5c6e2de502f7331f')
+
+package() {
+    cd "$srcdir/$_archive"
+    install -Dm0755 composectl "$pkgdir/usr/local/bin/composectl"
+    ln -s composectl "$pkgdir/usr/local/bin/compose"
+    install -Dm0644 LICENSE "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
+    install -Dm0644 compose.env "$pkgdir/usr/share/doc/$pkgname/compose.env"
+    install -Dm0644 compose@.service "$pkgdir/usr/lib/systemd/user/compose@.service"
+}

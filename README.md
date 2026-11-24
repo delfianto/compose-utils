@@ -14,11 +14,28 @@ Two tools, one binary — for managing Docker Compose projects.
 
 ## Installation
 
-1. **Ensure Rust (>= 1.85) and Cargo are installed.** ([rustup.rs](https://rustup.rs/))
-2. **Build and install:**
-    ```bash
-    ./systemd/install.sh
-    ```
+### Arch Linux (x86_64)
+
+The package installs `composectl`, the `compose` alias, and the systemd user unit. Create your `compose.env` using the [configuration guide](docs/configuration.md). Executables are installed under `/usr/local/bin`.
+
+Download the `.pkg.tar.zst` from [GitHub Releases](https://github.com/delfianto/compose-utils/releases/latest)
+and install it with `sudo pacman -U ./<package-file>`, or build the package
+from the checksum-verified release archive with `makepkg -si`:
+
+```sh
+git clone --branch v0.3.0 https://github.com/delfianto/compose-utils.git
+cd compose-utils/arch
+makepkg -si
+```
+
+### Build from source
+
+Source builds require Rust 1.100.0 or later.
+
+Build and install:
+```bash
+./systemd/install.sh
+```
 
 The installer builds the binary, installs it as `composectl`, creates a `compose` symlink, sets up the systemd unit template, and guides you through configuration.
 

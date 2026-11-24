@@ -3,7 +3,7 @@
 ## Rust Toolchain
 
 - **Edition:** 2024
-- **Minimum Supported Rust Version (MSRV):** 1.85
+- **Minimum Supported Rust Version (MSRV):** 1.100.0
 - **Build Profile:** Release builds use `opt-level = "z"` (size), LTO, single codegen unit, symbol stripping, and `panic = "abort"` for minimal binary size.
 
 ## Runtime Dependencies
