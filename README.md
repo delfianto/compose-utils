@@ -18,12 +18,13 @@ Two tools, one binary — for managing Docker Compose projects.
 
 The package installs `composectl`, the `compose` alias, and the systemd user unit. Create your `compose.env` using the [configuration guide](docs/configuration.md). Executables are installed under `/usr/bin`.
 
-Download the `.pkg.tar.zst` from [GitHub Releases](https://github.com/delfianto/compose-utils/releases/latest)
-and install it with `sudo pacman -U ./<package-file>`, or build the package
-from the checksum-verified release archive with `makepkg -si`:
+Download the `compose-utils` package from [GitHub Releases](https://github.com/delfianto/compose-utils/releases/latest)
+and install it with `sudo pacman -U ./<package-file>`. If pacman asks to remove the
+previous package, answer `y`. You can also build the package from the
+checksum-verified release archive with `makepkg -si`:
 
 ```sh
-git clone --branch v0.3.1 https://github.com/delfianto/compose-utils.git
+git clone --branch arch-v0.3.1-2 https://github.com/delfianto/compose-utils.git
 cd compose-utils/arch
 makepkg -si
 ```
