@@ -1,6 +1,6 @@
 pkgbase = compose-utils-bin
 	pkgdesc = Docker Compose helper and systemd controller
-	pkgver = 0.3.0
+	pkgver = 0.3.1
 	pkgrel = 1
 	url = https://github.com/delfianto/compose-utils
 	arch = x86_64
@@ -10,11 +10,11 @@ pkgbase = compose-utils-bin
 	depends = docker
 	depends = docker-compose
 	depends = systemd
-	provides = compose-utils=0.3.0
+	provides = compose-utils=0.3.1
 	conflicts = compose-utils
 	options = !strip
 	options = !debug
-	source = https://github.com/delfianto/compose-utils/releases/download/v0.3.0/compose-utils-v0.3.0-linux-x86_64.tar.gz
-	sha256sums = 15d7ae9ba78c1b1c3bd71838403c4fa7d1ea2cb31473214c5c6e2de502f7331f
+	source = https://github.com/delfianto/compose-utils/releases/download/v0.3.1/compose-utils-v0.3.1-linux-x86_64.tar.gz
+	sha256sums = 9a9d76f9a49b76fc728ce033d133a28d4903237ca0b7105c9884b237d390e1ab
 
 pkgname = compose-utils-bin

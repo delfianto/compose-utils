@@ -16,14 +16,14 @@ Two tools, one binary — for managing Docker Compose projects.
 
 ### Arch Linux (x86_64)
 
-The package installs `composectl`, the `compose` alias, and the systemd user unit. Create your `compose.env` using the [configuration guide](docs/configuration.md). Executables are installed under `/usr/local/bin`.
+The package installs `composectl`, the `compose` alias, and the systemd user unit. Create your `compose.env` using the [configuration guide](docs/configuration.md). Executables are installed under `/usr/bin`.
 
 Download the `.pkg.tar.zst` from [GitHub Releases](https://github.com/delfianto/compose-utils/releases/latest)
 and install it with `sudo pacman -U ./<package-file>`, or build the package
 from the checksum-verified release archive with `makepkg -si`:
 
 ```sh
-git clone --branch v0.3.0 https://github.com/delfianto/compose-utils.git
+git clone --branch v0.3.1 https://github.com/delfianto/compose-utils.git
 cd compose-utils/arch
 makepkg -si
 ```
