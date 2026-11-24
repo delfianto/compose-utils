@@ -3,6 +3,7 @@ name = "compose"
 version = "0.3.0"
 edition = "2024"
 rust-version = "1.100.0"
+license = "MIT"
 
 [[bin]]
 name = "composectl"
